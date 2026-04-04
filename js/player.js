@@ -66,15 +66,39 @@ const Player = (() => {
   }
 
   async function playExternal(url) {
-    if (audio.src && audio.src.startsWith('blob:')) { try { URL.revokeObjectURL(audio.src); } catch (_) {} }
-    currentTrack = null;
-    audio.src = url;
-    audio.load();
-    try { await audio.play(); return true; } catch (err) { console.error('playExternal failed:', err); return false; }
+  if (audio.src && audio.src.startsWith('blob:')) {
+    try { URL.revokeObjectURL(audio.src); } catch (_) {}
   }
 
-  function pause() { audio.pause(); }
-  function togglePlay() { if (isPlaying) pause(); else if (currentTrack) play(); }
+  currentTrack = null;
+  audio.src = url;
+  audio.load();
+
+  try {
+    await audio.play();
+    return true;
+  } catch (err) {
+    console.error('playExternal failed:', err);
+    emit('error', { message: 'Erreur de lecture audio' });
+    return false;
+  }
+}
+
+function pause() { audio.pause(); }
+
+function togglePlay() {
+  if (isPlaying) {
+    pause();
+    return;
+  }
+
+  if (audio.src) {
+    audio.play().catch((err) => {
+      console.error('Resume failed:', err);
+      emit('error', { message: 'Impossible de reprendre la lecture' });
+    });
+  }
+}
   function seek(fraction) { if (audio.duration) audio.currentTime = fraction * audio.duration; }
   function seekRelative(seconds) { if (audio.duration) audio.currentTime = Math.max(0, Math.min(audio.duration, audio.currentTime + seconds)); }
   function setVolume(vol) { audio.volume = Math.max(0, Math.min(1, vol)); emit('volumechange', { volume: audio.volume }); }
