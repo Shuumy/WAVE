@@ -1258,6 +1258,8 @@ try {
   }
 
   // ===== Init =====
+  syncYTAPIState();
+  ensureYTAPIScript();
   await loadUserTracks();
   await loadProfilePicture();
   refreshHomeView();
