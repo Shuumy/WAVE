@@ -1006,7 +1006,6 @@ if (shouldPreferDirectYouTubePlayback()) {
 }
 
 try {
-    try {
   const blobUrl = await downloadYouTubeAsBlobUrl(videoId);
   if (blobUrl) {
     currentYTBlobUrl = blobUrl;
