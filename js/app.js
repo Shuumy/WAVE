@@ -952,13 +952,20 @@
     if (el) el.classList.add('yt-playing');
     showToast('Chargement...');
     try {
-      const blobUrl = await downloadYouTubeAsBlobUrl(videoId);
-      if (blobUrl) {
-        currentYTBlobUrl = blobUrl;
-        const ok = await Player.playExternal(blobUrl);
-        if (ok) { updateYTMediaSession(); showToast(''); return; }
+  const blobUrl = await downloadYouTubeAsBlobUrl(videoId);
+  if (blobUrl) {
+    currentYTBlobUrl = blobUrl;
+    const ok = await Player.playExternal(blobUrl);
+    if (ok) {
+      if (ytPlayer && typeof ytPlayer.stopVideo === 'function') {
+        ytPlayer.stopVideo();
       }
-    } catch(e) { console.error('Blob download failed:', e); }
+      updateYTMediaSession();
+      showToast('');
+      return;
+    }
+  }
+} catch(e) { console.error('Blob download failed:', e); }
     showToast('Lecture via YouTube...');
     playYouTubeIFrame(videoId, index);
   }
