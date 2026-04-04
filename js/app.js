@@ -998,6 +998,14 @@ document.addEventListener('visibilitychange', () => {
     const el = document.querySelector(`.yt-result-item[data-index="${index}"]`);
     if (el) el.classList.add('yt-playing');
     showToast('Chargement...');
+
+if (shouldPreferDirectYouTubePlayback()) {
+  showToast('Lecture via YouTube...');
+  playYouTubeIFrame(videoId, index);
+  return;
+}
+
+try {
     try {
   const blobUrl = await downloadYouTubeAsBlobUrl(videoId);
   if (blobUrl) {
