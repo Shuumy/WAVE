@@ -652,15 +652,29 @@
 
   // ===== Player Controls =====
   btnPlay.addEventListener('click', () => {
-    if (ytMode && ytPlayer && typeof ytPlayer.getPlayerState === 'function') {
-      const s = ytPlayer.getPlayerState();
-      if (s === YT.PlayerState.PLAYING) ytPlayer.pauseVideo(); else ytPlayer.playVideo();
+  if (ytMode) {
+    if (currentYTBlobUrl) {
+      Player.togglePlay();
       return;
     }
-    const all = getAllTracks();
-    if (!Player.getCurrentTrack() && !ytMode && all.length) { Player.setQueue(all, 0); Player.play(all[0]); }
-    else Player.togglePlay();
-  });
+
+    if (ytPlayer && typeof ytPlayer.getPlayerState === 'function') {
+      const s = ytPlayer.getPlayerState();
+      if (s === YT.PlayerState.PLAYING) ytPlayer.pauseVideo();
+      else ytPlayer.playVideo();
+      return;
+    }
+  }
+
+  const all = getAllTracks();
+
+  if (!Player.getCurrentTrack() && !ytMode && all.length) {
+    Player.setQueue(all, 0);
+    Player.play(all[0]);
+  } else {
+    Player.togglePlay();
+  }
+});
   btnPrev.addEventListener('click', () => {
     if (ytMode) { if (ytCurrentIndex > 0) playYouTubeVideo(ytCurrentIndex - 1); return; }
     Player.prev();
