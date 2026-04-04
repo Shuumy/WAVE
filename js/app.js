@@ -1045,10 +1045,28 @@ try {
   return;
 }
       ytPlayer = new YT.Player('ytPlayer', {
-        height:'1', width:'1', videoId,
-        playerVars: { autoplay:1, controls:0, playsinline:1, disablekb:1 },
-        events: { onReady:(e)=>e.target.playVideo(), onStateChange:onYTStateChange },
-      });
+  height: '1',
+  width: '1',
+  videoId,
+  playerVars: {
+    autoplay: 1,
+    controls: 0,
+    playsinline: 1,
+    disablekb: 1,
+    origin: window.location.origin
+  },
+  events: {
+    onReady: (e) => {
+      try {
+        e.target.playVideo();
+        setTimeout(() => {
+          try { e.target.playVideo(); } catch (_) {}
+        }, 250);
+      } catch (_) {}
+    },
+    onStateChange: onYTStateChange
+  },
+});
     }
     startYTProgress();
     updateYTMediaSession();
