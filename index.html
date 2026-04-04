@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="description" content="WAVE — Chaque note est une onde">
+  <meta name="theme-color" content="#0A0A0A">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="WAVE">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="manifest" href="./manifest.json">
+  <link rel="icon" type="image/svg+xml" href="./assets/icons/favicon.svg">
+  <link rel="alternate icon" type="image/png" sizes="192x192" href="./assets/icons/icon-192.png">
+  <link rel="shortcut icon" type="image/png" sizes="192x192" href="./assets/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="./assets/icons/icon-192.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="./assets/icons/icon-180.png">
+  <link rel="apple-touch-startup-image" href="./assets/icons/icon-512.png">
+  <title>WAVE</title>
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="logo">
+        <svg class="logo-icon" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+          <path d="M 87 36 L 87 108 A 13 13 0 0 1 113 108 L 113 36" stroke="#FFCC00" stroke-width="9" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+          <line x1="100" y1="121" x2="100" y2="170" stroke="#FFCC00" stroke-width="9" stroke-linecap="round"/>
+          <line x1="59"  y1="57"  x2="79"  y2="57"  stroke="#FFCC00" stroke-width="3.5" stroke-linecap="round" opacity="0.85"/>
+          <line x1="62"  y1="75"  x2="79"  y2="75"  stroke="#FFCC00" stroke-width="3.5" stroke-linecap="round" opacity="0.60"/>
+          <line x1="67"  y1="93"  x2="79"  y2="93"  stroke="#FFCC00" stroke-width="3.5" stroke-linecap="round" opacity="0.35"/>
+          <line x1="121" y1="57"  x2="141" y2="57"  stroke="#FFCC00" stroke-width="3.5" stroke-linecap="round" opacity="0.85"/>
+          <line x1="121" y1="75"  x2="138" y2="75"  stroke="#FFCC00" stroke-width="3.5" stroke-linecap="round" opacity="0.60"/>
+          <line x1="121" y1="93"  x2="133" y2="93"  stroke="#FFCC00" stroke-width="3.5" stroke-linecap="round" opacity="0.35"/>
+        </svg>
+        <h1>Wave</h1>
+      </div>
+      <nav class="nav">
+        <button class="nav-btn active" data-view="home">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          <span>Accueil</span>
+        </button>
+        <button class="nav-btn" data-view="search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <span>Rechercher</span>
+        </button>
+        <button class="nav-btn" data-view="library">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+          <span>Bibliothèque</span>
+        </button>
+        <button class="nav-btn" data-view="import">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <span>Importer</span>
+        </button>
+      </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <div class="top-bar">
+        <div></div>
+        <div class="profile-avatar" id="profileAvatar" title="Photo de profil">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <input type="file" id="profileInput" accept="image/*" hidden>
+        </div>
+      </div>
+
+      <!-- ACCUEIL -->
+      <section class="view active" id="viewHome">
+        <h2 class="view-title">Accueil</h2>
+        <div class="search-bar" style="margin-bottom:28px">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="homeSearchInput" placeholder="Titre, artiste ou album..." autocomplete="off">
+        </div>
+        <div class="track-list" id="homeSearchResults" hidden></div>
+        <div id="popularSection" class="section">
+          <h3 class="section-title">Ma musique</h3>
+          <div class="track-list" id="popularTracks">
+            <p class="empty-state">Aucun morceau. Va dans Importer pour ajouter ta musique.</p>
+          </div>
+        </div>
+        <div id="recentSection" class="section">
+          <h3 class="section-title">Récemment joués</h3>
+          <div class="track-list" id="recentTracks">
+            <p class="empty-state">Aucun morceau joué récemment.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- RECHERCHER -->
+      <section class="view" id="viewSearch">
+        <h2 class="view-title">Rechercher</h2>
+        <p class="view-subtitle">Recherche et écoute sur YouTube</p>
+        <div class="yt-search-bar">
+          <svg viewBox="0 0 24 24" fill="#ff0000" width="16" height="16" style="flex-shrink:0">
+            <path d="M23.5 6.2c-.3-1-1-1.8-2-2.1C19.6 3.5 12 3.5 12 3.5s-7.6 0-9.5.6c-1 .3-1.7 1.1-2 2.1C0 8.1 0 12 0 12s0 3.9.5 5.8c.3 1 1 1.8 2 2.1 1.9.6 9.5.6 9.5.6s7.6 0 9.5-.6c1-.3 1.7-1.1 2-2.1.5-1.9.5-5.8.5-5.8s0-3.9-.5-5.8zM9.5 15.6V8.4l6.3 3.6-6.3 3.6z"/>
+          </svg>
+          <input type="text" id="ytSearchInput" placeholder="Rechercher sur YouTube..." autocomplete="off">
+          <button class="yt-search-btn" id="ytSearchBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          </button>
+        </div>
+        <div id="ytResults" class="yt-results"></div>
+      </section>
+
+      <!-- BIBLIOTHÈQUE -->
+      <section class="view" id="viewLibrary">
+        <h2 class="view-title">Bibliothèque</h2>
+        <div class="library-tabs">
+          <button class="tab-btn active" data-tab="all">Tout</button>
+          <button class="tab-btn" data-tab="favorites">Favoris</button>
+          <button class="tab-btn" data-tab="playlists">Playlists</button>
+        </div>
+        <div id="libraryContent">
+          <div class="track-list" id="libraryTracks"></div>
+        </div>
+      </section>
+
+      <!-- IMPORTER -->
+      <section class="view" id="viewImport">
+        <h2 class="view-title">Importer</h2>
+        <p class="view-subtitle">MP3, WAV, OGG, FLAC, AAC, M4A — stockés hors-ligne</p>
+        <div class="import-dropzone" id="importDropzone">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          <p class="dropzone-text">Glisse tes fichiers audio ici</p>
+          <p class="dropzone-or">ou</p>
+          <label class="import-btn" for="fileInput">Choisir des fichiers</label>
+          <input type="file" id="fileInput" accept="audio/*,video/*,.mp3,.wav,.ogg,.flac,.aac,.m4a,.opus,.webm,.mp4,.mpeg,.wma,.3gp,.aif,.aiff,.caf" multiple hidden>
+          <p class="dropzone-formats">MP3 · WAV · OGG · FLAC · AAC · M4A</p>
+        </div>
+        <div id="importProgress" hidden>
+          <div class="import-progress-bar"><div class="import-progress-fill" id="importProgressFill"></div></div>
+          <p class="import-progress-text" id="importProgressText">Importation...</p>
+        </div>
+        <div class="section" id="importedSection" hidden>
+          <h3 class="section-title">Mes fichiers importés</h3>
+          <div class="track-list" id="importedTracks"></div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Multi-select Bar -->
+    <div class="multiselect-bar" id="multiselectBar" hidden>
+      <button class="icon-btn" id="multiselectCancel">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+      <span class="multiselect-count" id="multiselectCount">0 sélectionné</span>
+      <div class="multiselect-actions">
+        <button class="icon-btn" id="multiselectFav" title="Favoris">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+        </button>
+        <button class="icon-btn" id="multiselectPlaylist" title="Playlist">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+        </button>
+        <button class="icon-btn" id="multiselectDelete" title="Supprimer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Player Bar -->
+    <footer class="player-bar" id="playerBar">
+      <div class="player-progress-row">
+        <span class="time" id="currentTime">0:00</span>
+        <div class="progress-bar" id="progressBar">
+          <div class="progress-fill" id="progressFill">
+            <div class="progress-thumb" id="progressThumb"></div>
+          </div>
+        </div>
+        <span class="time" id="totalTime">0:00</span>
+      </div>
+      <div class="player-main-row">
+        <div class="player-track-info">
+          <div class="player-artwork" id="playerArtwork">
+            <svg viewBox="0 0 200 200" width="18" height="18">
+              <path d="M 87 36 L 87 108 A 13 13 0 0 1 113 108 L 113 36" stroke="#404040" stroke-width="12" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+              <line x1="100" y1="121" x2="100" y2="170" stroke="#404040" stroke-width="12" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="player-details">
+            <span class="player-title" id="playerTitle">Aucun morceau</span>
+            <span class="player-artist" id="playerArtist">—</span>
+          </div>
+          <button class="icon-btn favorite-btn" id="playerFavorite">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+          </button>
+        </div>
+        <div class="player-controls">
+          <button class="icon-btn" id="btnShuffle">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+          </button>
+          <button class="icon-btn" id="btnPrev">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
+          </button>
+          <button class="play-btn" id="btnPlay">
+            <svg class="icon-play"  viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            <svg class="icon-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+          </button>
+          <button class="icon-btn" id="btnNext">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+          </button>
+          <button class="icon-btn" id="btnRepeat">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+          </button>
+        </div>
+        <div class="player-extra">
+          <button class="icon-btn" id="btnVolume">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+          </button>
+          <div class="volume-bar" id="volumeBar"><div class="volume-fill" id="volumeFill"></div></div>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast" hidden><span id="toastMessage"></span></div>
+
+  <!-- Confirm Modal -->
+  <div class="confirm-overlay" id="confirmModal" hidden>
+    <div class="confirm-box">
+      <p class="confirm-message" id="confirmMessage">Supprimer ce morceau ?</p>
+      <div class="confirm-actions">
+        <button class="confirm-no"  id="confirmNo">Annuler</button>
+        <button class="confirm-yes" id="confirmYes">Supprimer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Playlist Modal -->
+  <div class="modal-overlay" id="playlistModal" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="playlistModalTitle">Ajouter à une playlist</h3>
+        <button class="icon-btn" id="closePlaylistModal">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" id="playlistModalBody"></div>
+      <div class="modal-footer">
+        <button class="modal-create-btn" id="createPlaylistBtn">+ Nouvelle playlist</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Search in Playlist Modal -->
+  <div class="modal-overlay" id="playlistSearchModal" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Ajouter des morceaux</h3>
+        <button class="icon-btn" id="closePlaylistSearchModal">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-search-bar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="playlistSearchInput" placeholder="Rechercher..." autocomplete="off">
+        </div>
+        <div id="playlistSearchResults"></div>
+      </div>
+    </div>
+  </div>
+
+  <input type="file" id="playlistCoverInput" accept="image/*" hidden>
+  <div id="ytPlayerContainer" style="position:absolute;width:0;height:0;overflow:hidden;pointer-events:none;"><div id="ytPlayer"></div></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"></script>
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <script src="./js/db.js"></script>
+  <script src="./js/tracks.js"></script>
+  <script src="./js/player.js"></script>
+  <script src="./js/app.js"></script>
+</body>
+</html>
