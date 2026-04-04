@@ -1025,9 +1025,14 @@ try {
   }
 
   function playYouTubeIFrame(videoId, index) {
-    stopYTProgress();
-    if (ytPlayer && typeof ytPlayer.loadVideoById === 'function') {
-      ytPlayer.loadVideoById(videoId);
+  stopYTProgress();
+  syncYTAPIState();
+
+  if (ytPlayer && typeof ytPlayer.loadVideoById === 'function') {
+    ytPlayer.loadVideoById(videoId);
+    setTimeout(() => {
+      try { ytPlayer.playVideo(); } catch (_) {}
+    }, 150);
     } else {
       const container = document.getElementById('ytPlayerContainer');
       const old = document.getElementById('ytPlayer');
@@ -1035,7 +1040,10 @@ try {
       const div = document.createElement('div');
       div.id = 'ytPlayer';
       container.appendChild(div);
-      if (!ytAPIReady) { showToast('YouTube API non prête'); return; }
+      if (!ytAPIReady && !syncYTAPIState()) {
+  showToast('YouTube API non prête');
+  return;
+}
       ytPlayer = new YT.Player('ytPlayer', {
         height:'1', width:'1', videoId,
         playerVars: { autoplay:1, controls:0, playsinline:1, disablekb:1 },
