@@ -27,3 +27,16 @@ function generateArtwork(track) {
   // unescape+encodeURIComponent pour supporter les caractères Unicode dans btoa
   return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
 }
+
+// Charge l'extension SoundCloud sans modifier app.js.
+(function loadSoundCloudAddon() {
+  if (document.querySelector('script[data-wave-soundcloud-addon]')) return;
+  const files = ['./js/soundcloud_ui.js', './js/soundcloud_player.js'];
+  files.forEach((src, index) => {
+    const script = document.createElement('script');
+    script.src = src;
+    script.defer = true;
+    script.dataset.waveSoundCloudAddon = String(index + 1);
+    document.head.appendChild(script);
+  });
+})();
