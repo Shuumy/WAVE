@@ -4,7 +4,7 @@
  * Les assets de l'app sont servis depuis le cache avec mise à jour en arrière-plan.
  */
 
-const CACHE_NAME = 'wave-v4';
+const CACHE_NAME = 'wave-v5';
 const ASSETS = [
   './',
   './index.html',
@@ -13,8 +13,6 @@ const ASSETS = [
   './js/tracks.js',
   './js/player.js',
   './js/app.js',
-  './js/soundcloud_ui.js',
-  './js/soundcloud_player.js',
   './manifest.json',
 ];
 
