@@ -1,5 +1,6 @@
 /**
  * WAVE — Track helpers (artwork generation, duration formatting)
+ * SÉCURITÉ : La lettre d'artwork est sanitisée avant injection dans le SVG.
  */
 
 function formatDuration(seconds) {
@@ -11,12 +12,31 @@ function formatDuration(seconds) {
 
 function generateArtwork(track) {
   if (track.coverArt) return track.coverArt;
-  const color  = track.color || '#333333';
-  const letter = (track.title || '?')[0].toUpperCase();
+  const color = track.color || '#333333';
+
+  // SÉCURITÉ : Ne conserver que les caractères affichables sans signification HTML/SVG.
+  // Empêche toute injection dans la balise <text> du SVG généré.
+  const rawLetter = (track.title || '?')[0].toUpperCase();
+  const letter = /^[A-Z0-9ÀÂÄÉÈÊËÎÏÔÖÙÛÜÇ\u00C0-\u024F]$/.test(rawLetter) ? rawLetter : '?';
+
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44">` +
     `<rect width="44" height="44" fill="${color}"/>` +
     `<text x="22" y="29" font-family="sans-serif" font-size="20" font-weight="600" ` +
     `fill="rgba(255,255,255,0.85)" text-anchor="middle">${letter}</text>` +
     `</svg>`;
-  return 'data:image/svg+xml;base64,' + btoa(svg);
+  // unescape+encodeURIComponent pour supporter les caractères Unicode dans btoa
+  return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
 }
+
+// Charge l'extension SoundCloud sans modifier app.js.
+(function loadSoundCloudAddon() {
+  if (document.querySelector('script[data-wave-soundcloud-addon]')) return;
+  const files = ['./js/soundcloud_ui.js', './js/soundcloud_player.js'];
+  files.forEach((src, index) => {
+    const script = document.createElement('script');
+    script.src = src;
+    script.defer = true;
+    script.dataset.waveSoundCloudAddon = String(index + 1);
+    document.head.appendChild(script);
+  });
+})();
