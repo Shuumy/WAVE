@@ -1,6 +1,6 @@
 /**
  * WAVE — Main Application
- * Fixes: YT blob-download playback, search clear, delete confirm, showDelete in home
+ * SÉCURITÉ : XSS échappé, URLs sanitisées, tailles limitées, types validés.
  */
 (async () => {
   await DB.open();
@@ -8,6 +8,61 @@
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => document.querySelectorAll(sel);
 
+  // ═══════════════════════════════════════════════════
+  // HELPERS SÉCURITÉ
+  // ═══════════════════════════════════════════════════
+
+  /**
+   * Échappe toutes les données utilisateur avant injection dans le DOM.
+   * Couvre les contextes texte ET attribut HTML (échappe ", ', <, >, &).
+   */
+  function esc(s) {
+    return String(s ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  /**
+   * Valide les URLs externes utilisées dans src/href.
+   * Bloque javascript:, data: arbitraires, et tout protocole non autorisé.
+   */
+  function sanitizeURL(url) {
+    if (!url || typeof url !== 'string') return '';
+    try {
+      const u = new URL(url);
+      if (!['https:', 'http:', 'data:', 'blob:'].includes(u.protocol)) return '';
+      // Bloquer les data: URLs autres qu'image (pour les thumbnails externes)
+      if (u.protocol === 'data:' && !url.startsWith('data:image/')) return '';
+      return url;
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * Valide qu'un nom de playlist ne contient pas de caractères de contrôle.
+   * Retourne le nom nettoyé ou null si invalide.
+   */
+  function validatePlaylistName(name) {
+    if (!name || typeof name !== 'string') return null;
+    const trimmed = name.trim().replace(/[\x00-\x1F\x7F]/g, '');
+    if (trimmed.length === 0 || trimmed.length > 100) return null;
+    return trimmed;
+  }
+
+  // ═══════════════════════════════════════════════════
+  // LIMITES DE SÉCURITÉ
+  // ═══════════════════════════════════════════════════
+  const MAX_AUDIO_SIZE  = 500 * 1024 * 1024; // 500 Mo par fichier audio
+  const MAX_IMAGE_SIZE  =   5 * 1024 * 1024; // 5 Mo pour les images (cover/profil)
+  const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
+  // ═══════════════════════════════════════════════════
+  // REFS DOM
+  // ═══════════════════════════════════════════════════
   const navBtns           = $$('.nav-btn');
   const views             = $$('.view');
   const homeSearchInput   = $('#homeSearchInput');
@@ -60,6 +115,7 @@
   // ===== Confirm Dialog =====
   function showConfirm(message) {
     return new Promise((resolve) => {
+      // Utilise textContent pour éviter toute injection dans le message de confirmation
       confirmMessage.textContent = message;
       confirmModal.hidden = false;
       const cleanup = (result) => {
@@ -104,6 +160,7 @@
   let toastTimer = null;
   function showToast(msg) {
     if (!msg) { toast.classList.remove('show'); return; }
+    // textContent pour éviter XSS dans les messages de toast
     toastMessage.textContent = msg;
     toast.hidden = false;
     toast.classList.add('show');
@@ -117,16 +174,49 @@
   // ===== Profile Picture =====
   async function loadProfilePicture() {
     const pic = await DB.getSetting('profilePicture');
-    if (pic) profileAvatar.innerHTML = `<img src="${pic}" alt="Profil">`;
+    if (pic) {
+      const img = document.createElement('img');
+      img.src = sanitizeURL(pic) || pic; // data: URLs internes acceptées
+      img.alt = 'Profil';
+      profileAvatar.innerHTML = '';
+      profileAvatar.appendChild(img);
+    }
   }
+
   profileAvatar.addEventListener('click', () => profileInput.click());
+
   profileInput.addEventListener('change', async () => {
     const file = profileInput.files[0];
     if (!file) return;
+
+    // Validation du type MIME réel (pas seulement l'extension)
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+      showToast('Format non supporté. Utilise JPG, PNG, GIF ou WebP.');
+      profileInput.value = '';
+      return;
+    }
+
+    // Validation de la taille
+    if (file.size > MAX_IMAGE_SIZE) {
+      showToast('Image trop volumineuse (max 5 Mo).');
+      profileInput.value = '';
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = async (e) => {
-      await DB.setSetting('profilePicture', e.target.result);
-      profileAvatar.innerHTML = `<img src="${e.target.result}" alt="Profil">`;
+      const dataUrl = e.target.result;
+      // Vérifier que c'est bien une data:image/ URL
+      if (!dataUrl.startsWith('data:image/')) {
+        showToast('Format d\'image invalide.');
+        return;
+      }
+      await DB.setSetting('profilePicture', dataUrl);
+      const img = document.createElement('img');
+      img.src = dataUrl;
+      img.alt = 'Profil';
+      profileAvatar.innerHTML = '';
+      profileAvatar.appendChild(img);
       showToast('Photo mise à jour');
     };
     reader.readAsDataURL(file);
@@ -140,7 +230,7 @@
     multiselectBar.hidden = false;
     if (firstId) {
       selectedTrackIds.add(firstId);
-      $$( `.track-item[data-track-id="${firstId}"]`).forEach(el => el.classList.add('selected'));
+      $$( `.track-item[data-track-id="${CSS.escape(firstId)}"]`).forEach(el => el.classList.add('selected'));
     }
     updateMultiselectCount();
   }
@@ -195,6 +285,7 @@
   function renderSortRow(container) {
     const row = document.createElement('div');
     row.className = 'sort-row';
+    // Contenu statique — pas de données utilisateur
     row.innerHTML = `
       <span class="sort-label">Trier :</span>
       <button class="sort-btn ${librarySort==='date'?'active':''}" data-sort="date">Date d'ajout</button>
@@ -217,7 +308,9 @@
                 const bytes = new Uint8Array(pic.data);
                 let b = '';
                 bytes.forEach(c => b += String.fromCharCode(c));
-                resolve(`data:${pic.format};base64,${btoa(b)}`);
+                const dataUrl = `data:${pic.format};base64,${btoa(b)}`;
+                // Valider que c'est bien une image
+                resolve(dataUrl.startsWith('data:image/') ? dataUrl : null);
               } catch { resolve(null); }
             } else resolve(null);
           },
@@ -228,6 +321,10 @@
   }
 
   // ===== Track Element =====
+  /**
+   * Crée un élément de piste audio.
+   * SÉCURITÉ : toutes les données utilisateur sont échappées via esc() ou textContent.
+   */
   function createTrackElement(track, index, list, opts = {}) {
     const { playlistId, onRemoveFromPlaylist, showDelete } = opts;
     const wrap = document.createElement('div');
@@ -238,10 +335,13 @@
     const ct = Player.getCurrentTrack();
     if (ct && ct.id === track.id) div.classList.add('playing');
     if (selectMode && selectedTrackIds.has(track.id)) div.classList.add('selected');
-    const artSrc = generateArtwork(track);
+
+    // L'artwork est soit une data:image/ URL (safe) soit une URL https: générée par generateArtwork
+    const artSrc = sanitizeURL(generateArtwork(track)) || generateArtwork(track);
 
     let actionBtn = '';
     if (playlistId) {
+      // Contenu statique : pas d'injection
       actionBtn = `<button class="icon-btn remove-pl-btn" title="Retirer">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>`;
@@ -254,15 +354,16 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
     </button>` : '';
 
+    // ⚠️ SÉCURITÉ : esc() appliqué sur toutes les données dynamiques
     div.innerHTML = `
       <div class="track-select-check"><div class="track-checkbox"></div></div>
       <div class="track-artwork">
-        <img src="${artSrc}" alt="${track.title}">
+        <img src="${esc(artSrc)}" alt="${esc(track.title)}">
         ${ct && ct.id === track.id && Player.getIsPlaying() ? `<div class="playing-indicator"><div class="bars"><div class="bar"></div><div class="bar"></div><div class="bar"></div></div></div>` : ''}
       </div>
       <div class="track-info">
-        <div class="track-title">${track.title}</div>
-        <div class="track-artist">${track.artist}${track.album ? ' — ' + track.album : ''}</div>
+        <div class="track-title">${esc(track.title)}</div>
+        <div class="track-artist">${esc(track.artist)}${track.album ? ' — ' + esc(track.album) : ''}</div>
       </div>
       <div class="track-actions">
         <span class="track-duration">${formatDuration(track.duration)}</span>
@@ -355,8 +456,15 @@
       pls.forEach(pl => {
         const opt = document.createElement('div');
         opt.className = 'playlist-option';
-        const img = pl.coverImage ? `<div class="pl-color" style="background:${pl.coverColor};overflow:hidden"><img src="${pl.coverImage}" style="width:100%;height:100%;object-fit:cover;border-radius:3px"></div>` : `<div class="pl-color" style="background:${pl.coverColor}"></div>`;
-        opt.innerHTML = `${img}<span>${pl.name}</span>`;
+        // ⚠️ SÉCURITÉ : pl.name échappé via esc()
+        const coverSrc = pl.coverImage ? sanitizeURL(pl.coverImage) || '' : '';
+        const imgHtml = pl.coverImage
+          ? `<div class="pl-color" style="background:${esc(pl.coverColor)};overflow:hidden"><img src="${esc(coverSrc)}" style="width:100%;height:100%;object-fit:cover;border-radius:3px" alt=""></div>`
+          : `<div class="pl-color" style="background:${esc(pl.coverColor)}"></div>`;
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = pl.name; // textContent = sûr
+        opt.innerHTML = imgHtml;
+        opt.appendChild(nameSpan);
         opt.addEventListener('click', async () => {
           for (const tid of modalTrackIds) await DB.addTrackToPlaylist(pl.id, tid);
           showToast(`${modalTrackIds.length > 1 ? modalTrackIds.length + ' morceaux ajoutés' : 'Ajouté'} à "${pl.name}"`);
@@ -370,9 +478,10 @@
   closePlaylistModal.addEventListener('click', () => { playlistModal.hidden = true; });
   playlistModal.addEventListener('click', (e) => { if (e.target === playlistModal) playlistModal.hidden = true; });
   createPlaylistBtn.addEventListener('click', async () => {
-    const name = prompt('Nom de la playlist:');
-    if (!name?.trim()) return;
-    const pl = await DB.createPlaylist(name.trim());
+    const raw = prompt('Nom de la playlist:');
+    const name = validatePlaylistName(raw);
+    if (!name) return;
+    const pl = await DB.createPlaylist(name);
     if (modalTrackIds?.length) {
       for (const tid of modalTrackIds) await DB.addTrackToPlaylist(pl.id, tid);
       showToast(`"${pl.name}" créée avec ${modalTrackIds.length} morceau${modalTrackIds.length !== 1 ? 'x' : ''}`);
@@ -460,20 +569,24 @@
     if (!pls.length) {
       content.innerHTML = `<div style="text-align:center;padding:40px 20px"><p class="empty-state">Aucune playlist.</p><button class="import-btn" id="createPlaylistFromLib" style="margin-top:16px">+ Nouvelle playlist</button></div>`;
       $('#createPlaylistFromLib').addEventListener('click', async () => {
-        const n = prompt('Nom de la playlist:');
-        if (!n?.trim()) return;
-        await DB.createPlaylist(n.trim()); showToast('Playlist créée'); renderPlaylistsGrid();
+        const raw = prompt('Nom de la playlist:');
+        const n = validatePlaylistName(raw);
+        if (!n) return;
+        await DB.createPlaylist(n); showToast('Playlist créée'); renderPlaylistsGrid();
       });
       return;
     }
+
+    // ⚠️ SÉCURITÉ : pl.name et pl.coverColor passent par esc()
     let html = '<div class="playlists-grid">';
     pls.forEach(pl => {
       const tracks = pl.trackIds.map(id => findTrack(id)).filter(Boolean);
       const total = tracks.reduce((s,t) => s + (t.duration||0), 0);
-      html += `<div class="playlist-card" style="background:${pl.coverColor}" data-playlist-id="${pl.id}">
-        <button class="playlist-card-delete" data-pl-delete="${pl.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-        ${pl.coverImage ? `<img class="playlist-card-cover-img" src="${pl.coverImage}" alt="${pl.name}">` : ''}
-        <div class="playlist-card-name">${pl.name}</div>
+      const coverSrc = pl.coverImage ? sanitizeURL(pl.coverImage) || '' : '';
+      html += `<div class="playlist-card" style="background:${esc(pl.coverColor)}" data-playlist-id="${esc(pl.id)}">
+        <button class="playlist-card-delete" data-pl-delete="${esc(pl.id)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        ${coverSrc ? `<img class="playlist-card-cover-img" src="${esc(coverSrc)}" alt="">` : ''}
+        <div class="playlist-card-name">${esc(pl.name)}</div>
         <div class="playlist-card-count">${pl.trackIds.length} morceau${pl.trackIds.length!==1?'x':''} · ${formatTotalDuration(total)}</div>
       </div>`;
     });
@@ -495,9 +608,10 @@
       });
     });
     $('#createPlaylistFromLib').addEventListener('click', async () => {
-      const n = prompt('Nom de la playlist:');
-      if (!n?.trim()) return;
-      await DB.createPlaylist(n.trim()); showToast('Playlist créée'); renderPlaylistsGrid();
+      const raw = prompt('Nom de la playlist:');
+      const n = validatePlaylistName(raw);
+      if (!n) return;
+      await DB.createPlaylist(n); showToast('Playlist créée'); renderPlaylistsGrid();
     });
   }
 
@@ -507,18 +621,21 @@
     const content = $('#libraryContent');
     const tracks = pl.trackIds.map(id => findTrack(id)).filter(Boolean);
     const totalSec = tracks.reduce((s,t) => s + (t.duration||0), 0);
+    const coverSrc = pl.coverImage ? sanitizeURL(pl.coverImage) || '' : '';
+
+    // ⚠️ SÉCURITÉ : esc() sur pl.name, esc() sur coverSrc
     content.innerHTML = `
       <button class="playlist-back-btn" id="playlistBack">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg> Retour
       </button>
       <div class="playlist-detail-header">
-        <div class="playlist-detail-cover" style="background:${pl.coverColor}" id="playlistCoverBtn">
-          ${pl.coverImage ? `<img src="${pl.coverImage}" alt="${pl.name}">` : '&#9835;'}
+        <div class="playlist-detail-cover" style="background:${esc(pl.coverColor)}" id="playlistCoverBtn">
+          ${coverSrc ? `<img src="${esc(coverSrc)}" alt="">` : '&#9835;'}
           <div class="playlist-cover-overlay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></div>
         </div>
         <div class="playlist-detail-info">
           <h3>
-            <span>${pl.name}</span>
+            <span id="playlistNameSpan"></span>
             <button class="playlist-rename-btn" id="playlistRenameBtn" title="Renommer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
           </h3>
           <p>${tracks.length} morceau${tracks.length!==1?'x':''} · ${formatTotalDuration(totalSec)}</p>
@@ -530,13 +647,18 @@
         </div>
       </div>
       <div class="track-list" id="playlistTracks"></div>`;
+
+    // Injection sécurisée du nom via textContent
+    $('#playlistNameSpan').textContent = pl.name;
+
     if (!tracks.length) $('#playlistTracks').innerHTML = '<p class="empty-state">Aucun morceau. Clique sur "Ajouter des morceaux".</p>';
     else renderTrackList($('#playlistTracks'), tracks, { playlistId: plId, onRemoveFromPlaylist: () => renderPlaylistDetail(plId) });
     $('#playlistBack').addEventListener('click', () => { currentPlaylistView = null; refreshLibraryView(); });
     $('#playlistRenameBtn').addEventListener('click', async () => {
-      const n = prompt('Nouveau nom:', pl.name);
-      if (!n?.trim() || n.trim() === pl.name) return;
-      pl.name = n.trim(); await DB.updatePlaylist(pl);
+      const raw = prompt('Nouveau nom:', pl.name);
+      const n = validatePlaylistName(raw);
+      if (!n || n === pl.name) return;
+      pl.name = n; await DB.updatePlaylist(pl);
       showToast('Playlist renommée'); renderPlaylistDetail(plId);
     });
     $('#playlistCoverBtn').addEventListener('click', () => { playlistCoverInput.dataset.playlistId = plId; playlistCoverInput.click(); });
@@ -546,10 +668,25 @@
   playlistCoverInput.addEventListener('change', async () => {
     const file = playlistCoverInput.files[0]; if (!file) return;
     const plId = playlistCoverInput.dataset.playlistId; if (!plId) return;
+
+    // Validation type et taille pour la cover de playlist
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+      showToast('Format non supporté. Utilise JPG, PNG, GIF ou WebP.');
+      playlistCoverInput.value = ''; return;
+    }
+    if (file.size > MAX_IMAGE_SIZE) {
+      showToast('Image trop volumineuse (max 5 Mo).');
+      playlistCoverInput.value = ''; return;
+    }
+
     const reader = new FileReader();
     reader.onload = async (e) => {
+      const dataUrl = e.target.result;
+      if (!dataUrl.startsWith('data:image/')) {
+        showToast('Format d\'image invalide.'); return;
+      }
       const pl = await DB.getPlaylist(plId); if (!pl) return;
-      pl.coverImage = e.target.result; await DB.updatePlaylist(pl);
+      pl.coverImage = dataUrl; await DB.updatePlaylist(pl);
       showToast('Image mise à jour');
       if (currentPlaylistView === plId) renderPlaylistDetail(plId);
     };
@@ -563,6 +700,7 @@
     renderPlaylistSearchResults(plId, '');
     setTimeout(() => playlistSearchInput.focus(), 100);
   }
+
   async function renderPlaylistSearchResults(plId, q) {
     const pl = await DB.getPlaylist(plId); if (!pl) return;
     const all = getAllTracks();
@@ -573,7 +711,18 @@
       const already = pl.trackIds.includes(track.id);
       const opt = document.createElement('div');
       opt.className = 'modal-track-option' + (already ? ' already-added' : '');
-      opt.innerHTML = `<div class="track-thumb"><img src="${generateArtwork(track)}" alt=""></div><div class="track-meta"><div class="track-meta-title">${track.title}</div><div class="track-meta-artist">${track.artist}</div></div><div class="track-add-icon">${already?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>':'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>'}</div>`;
+      const artSrc = sanitizeURL(generateArtwork(track)) || generateArtwork(track);
+      // ⚠️ SÉCURITÉ : esc() sur title et artist
+      opt.innerHTML = `
+        <div class="track-thumb"><img src="${esc(artSrc)}" alt=""></div>
+        <div class="track-meta">
+          <div class="track-meta-title">${esc(track.title)}</div>
+          <div class="track-meta-artist">${esc(track.artist)}</div>
+        </div>
+        <div class="track-add-icon">${already
+          ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>'
+          : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>'
+        }</div>`;
       if (!already) {
         opt.addEventListener('click', async () => {
           await DB.addTrackToPlaylist(plId, track.id);
@@ -621,9 +770,17 @@
 
   // ===== Player Events =====
   Player.on('trackchange', async (track) => {
-    playerTitle.textContent = track.title;
+    // textContent pour title et artist : sûr sans esc()
+    playerTitle.textContent  = track.title;
     playerArtist.textContent = track.artist;
-    playerArtwork.innerHTML = `<img src="${generateArtwork(track)}" alt="">`;
+
+    // Artwork via DOM API (pas innerHTML avec données brutes)
+    const img = document.createElement('img');
+    img.src = sanitizeURL(generateArtwork(track)) || generateArtwork(track);
+    img.alt = '';
+    playerArtwork.innerHTML = '';
+    playerArtwork.appendChild(img);
+
     const isFav = await DB.isFavorite(track.id);
     playerFavorite.classList.toggle('active', isFav);
     playerFavorite.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
@@ -652,29 +809,29 @@
 
   // ===== Player Controls =====
   btnPlay.addEventListener('click', () => {
-  if (ytMode) {
-    if (currentYTBlobUrl) {
+    if (ytMode) {
+      if (currentYTBlobUrl) {
+        Player.togglePlay();
+        return;
+      }
+
+      if (ytPlayer && typeof ytPlayer.getPlayerState === 'function') {
+        const s = ytPlayer.getPlayerState();
+        if (s === YT.PlayerState.PLAYING) ytPlayer.pauseVideo();
+        else ytPlayer.playVideo();
+        return;
+      }
+    }
+
+    const all = getAllTracks();
+
+    if (!Player.getCurrentTrack() && !ytMode && all.length) {
+      Player.setQueue(all, 0);
+      Player.play(all[0]);
+    } else {
       Player.togglePlay();
-      return;
     }
-
-    if (ytPlayer && typeof ytPlayer.getPlayerState === 'function') {
-      const s = ytPlayer.getPlayerState();
-      if (s === YT.PlayerState.PLAYING) ytPlayer.pauseVideo();
-      else ytPlayer.playVideo();
-      return;
-    }
-  }
-
-  const all = getAllTracks();
-
-  if (!Player.getCurrentTrack() && !ytMode && all.length) {
-    Player.setQueue(all, 0);
-    Player.play(all[0]);
-  } else {
-    Player.togglePlay();
-  }
-});
+  });
   btnPrev.addEventListener('click', () => {
     if (ytMode) { if (ytCurrentIndex > 0) playYouTubeVideo(ytCurrentIndex - 1); return; }
     Player.prev();
@@ -735,7 +892,7 @@
     playerFavorite.classList.toggle('active', isFav);
     playerFavorite.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
     showToast(isFav ? 'Ajouté aux favoris' : 'Retiré des favoris');
-    $$(`.fav-btn[data-track-id="${track.id}"]`).forEach(btn => {
+    $$(`.fav-btn[data-track-id="${CSS.escape(track.id)}"]`).forEach(btn => {
       btn.classList.toggle('fav-active', isFav);
       btn.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
     });
@@ -756,9 +913,9 @@
   });
 
   // ===== File Import =====
-  const importDropzone    = $('#importDropzone');
-  const fileInput         = $('#fileInput');
-  const importProgress    = $('#importProgress');
+  const importDropzone     = $('#importDropzone');
+  const fileInput          = $('#fileInput');
+  const importProgress     = $('#importProgress');
   const importProgressFill = $('#importProgressFill');
   const importProgressText = $('#importProgressText');
 
@@ -784,6 +941,7 @@
   function randColor() {
     return ['#e94560','#7b2ff7','#00b4d8','#ff9800','#4caf50','#ff5722','#9c27b0','#3f51b5','#00e676','#f44336'][Math.floor(Math.random()*10)];
   }
+
   async function importFiles(files) {
     const candidates = Array.from(files).filter(isAudio);
     const list = candidates.length ? candidates : Array.from(files);
@@ -791,15 +949,25 @@
     importProgress.hidden = false;
     let ok = 0, fail = 0;
     for (const file of list) {
+      // ⚠️ SÉCURITÉ : Limite de taille
+      if (file.size > MAX_AUDIO_SIZE) {
+        showToast(`"${file.name.slice(0, 40)}" trop volumineux (max 500 Mo)`);
+        fail++; continue;
+      }
+
       const { title, artist } = parseName(file.name);
       const { valid, duration } = await validateAudio(file);
       if (!valid) { fail++; continue; }
       const coverArt = await extractCoverArt(file);
+
+      // Valider que la coverArt extraite est bien une image
+      const safeCoverArt = coverArt?.startsWith('data:image/') ? coverArt : null;
+
       const meta = {
         id: 'user-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),
         title, artist, album:'', duration:Math.round(duration),
         genre:'', color:randColor(), userImported:true,
-        fileName:file.name, importedAt:Date.now(), coverArt:coverArt||null,
+        fileName:file.name, importedAt:Date.now(), coverArt:safeCoverArt,
       };
       await DB.saveUserTrack(meta, file);
       userTracks.push(meta); ok++;
@@ -822,63 +990,63 @@
   const ytSearchBtn        = $('#ytSearchBtn');
   const ytResultsContainer = $('#ytResults');
 
-let ytPlayer      = null;
-let ytAPIReady    = false;
-let ytMode        = false;
-let ytCurrentVideo = null;
-let ytSearchResults = [];
-let ytCurrentIndex  = -1;
-let ytProgressInterval = null;
-let currentYTBlobUrl   = null;
+  let ytPlayer       = null;
+  let ytAPIReady     = false;
+  let ytMode         = false;
+  let ytCurrentVideo = null;
+  let ytSearchResults  = [];
+  let ytCurrentIndex   = -1;
+  let ytProgressInterval = null;
+  let currentYTBlobUrl   = null;
 
-function syncYTAPIState() {
-  if (window.YT && typeof window.YT.Player === 'function') {
-    ytAPIReady = true;
-    return true;
+  function syncYTAPIState() {
+    if (window.YT && typeof window.YT.Player === 'function') {
+      ytAPIReady = true;
+      return true;
+    }
+    return false;
   }
-  return false;
-}
 
-function ensureYTAPIScript() {
-  if (syncYTAPIState()) return;
+  function ensureYTAPIScript() {
+    if (syncYTAPIState()) return;
 
-  const alreadyThere = document.querySelector('script[data-yt-iframe-api]');
-  if (alreadyThere) return;
+    const alreadyThere = document.querySelector('script[data-yt-iframe-api]');
+    if (alreadyThere) return;
 
-  const s = document.createElement('script');
-  s.src = 'https://www.youtube.com/iframe_api';
-  s.async = true;
-  s.dataset.ytIframeApi = '1';
-  document.head.appendChild(s);
-}
+    const s = document.createElement('script');
+    s.src = 'https://www.youtube.com/iframe_api';
+    s.async = true;
+    s.dataset.ytIframeApi = '1';
+    document.head.appendChild(s);
+  }
 
-function isIOSDevice() {
-  return /iPad|iPhone|iPod/.test(navigator.userAgent);
-}
+  function isIOSDevice() {
+    return /iPad|iPhone|iPod/.test(navigator.userAgent);
+  }
 
-function isStandalonePWA() {
-  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-}
+  function isStandalonePWA() {
+    return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  }
 
-function shouldPreferDirectYouTubePlayback() {
-  return isIOSDevice() && isStandalonePWA();
-}
+  function shouldPreferDirectYouTubePlayback() {
+    return isIOSDevice() && isStandalonePWA();
+  }
 
-window.onYouTubeIframeAPIReady = () => {
-  ytAPIReady = true;
-};
+  window.onYouTubeIframeAPIReady = () => {
+    ytAPIReady = true;
+  };
 
-window.addEventListener('pageshow', () => {
-  syncYTAPIState();
-  ensureYTAPIScript();
-});
-
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) {
+  window.addEventListener('pageshow', () => {
     syncYTAPIState();
     ensureYTAPIScript();
-  }
-});
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      syncYTAPIState();
+      ensureYTAPIScript();
+    }
+  });
 
   const PIPED_INSTANCES = [
     'https://pipedapi.kavin.rocks',
@@ -921,22 +1089,33 @@ document.addEventListener('visibilitychange', () => {
     if (!item.url) return null;
     try { return new URLSearchParams(item.url.split('?')[1]).get('v'); } catch { return null; }
   }
+
   function fetchWithTimeout(url, opts={}, ms=15000) {
+    // ⚠️ SÉCURITÉ : Valider que l'URL cible est bien HTTPS
+    try {
+      const u = new URL(url);
+      if (u.protocol !== 'https:') return Promise.reject(new Error('HTTPS requis'));
+    } catch {
+      return Promise.reject(new Error('URL invalide'));
+    }
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), ms);
     return fetch(url, { ...opts, signal:ctrl.signal }).finally(() => clearTimeout(t));
   }
-  function escapeHTML(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 
   async function searchYouTube(q) {
+    // Limiter la longueur de la requête
+    const safeQ = q.slice(0, 200);
     for (const inst of PIPED_INSTANCES) {
       try {
-        const r = await fetchWithTimeout(`${inst}/search?q=${encodeURIComponent(q)}&filter=music_songs`, {}, 8000);
+        const r = await fetchWithTimeout(`${inst}/search?q=${encodeURIComponent(safeQ)}&filter=music_songs`, {}, 8000);
         if (!r.ok) continue;
         const data = await r.json();
         const items = (data.items||[]).filter(i => i.type==='stream'&&i.url);
         if (items.length) return items.slice(0,12);
-      } catch(e) { console.warn('Piped search',inst,e.name==='AbortError'?'timeout':e.message); }
+      } catch(e) {
+        if (e.name !== 'AbortError') console.error('Piped search error:', inst);
+      }
     }
     throw new Error('Aucun serveur disponible');
   }
@@ -951,13 +1130,21 @@ document.addEventListener('visibilitychange', () => {
         const sorted = data.audioStreams.filter(s=>s.url&&s.mimeType).sort((a,b)=>(b.bitrate||0)-(a.bitrate||0));
         for (const stream of sorted.slice(0,3)) {
           try {
-            const ar = await fetchWithTimeout(stream.url, {}, 30000);
+            // ⚠️ SÉCURITÉ : Valider l'URL du stream avant de la fetch
+            const streamUrl = sanitizeURL(stream.url);
+            if (!streamUrl) continue;
+            const ar = await fetchWithTimeout(streamUrl, {}, 30000);
             if (!ar.ok) continue;
+            const contentType = ar.headers.get('content-type') || '';
+            // Valider que c'est bien de l'audio
+            if (!contentType.startsWith('audio/') && !contentType.startsWith('video/') && !contentType.includes('octet-stream')) continue;
             const blob = await ar.blob();
             if (blob.size > 5000) return URL.createObjectURL(blob);
           } catch {}
         }
-      } catch(e) { console.warn('Piped blob',inst,e.name==='AbortError'?'timeout':e.message); }
+      } catch(e) {
+        if (e.name !== 'AbortError') console.error('Piped blob error:', inst);
+      }
     }
     const invs = await getInvidiousInstances();
     for (const inst of invs) {
@@ -968,14 +1155,16 @@ document.addEventListener('visibilitychange', () => {
         const fmts = (data.adaptiveFormats||[]).filter(f=>f.type?.startsWith('audio/')&&f.itag).sort((a,b)=>(parseInt(b.bitrate)||0)-(parseInt(a.bitrate)||0));
         for (const fmt of fmts.slice(0,2)) {
           try {
-            const url = `${inst}/latest_version?id=${videoId}&itag=${fmt.itag}&local=true`;
+            const url = `${inst}/latest_version?id=${videoId}&itag=${encodeURIComponent(fmt.itag)}&local=true`;
             const ar = await fetchWithTimeout(url, {}, 30000);
             if (!ar.ok) continue;
             const blob = await ar.blob();
             if (blob.size > 5000) return URL.createObjectURL(blob);
           } catch {}
         }
-      } catch(e) { console.warn('Invidious blob',inst,e.name==='AbortError'?'timeout':e.message); }
+      } catch(e) {
+        if (e.name !== 'AbortError') console.error('Invidious blob error:', inst);
+      }
     }
     return null;
   }
@@ -983,15 +1172,29 @@ document.addEventListener('visibilitychange', () => {
   async function playYouTubeVideo(index) {
     const item = ytSearchResults[index]; if (!item) return;
     const videoId = getVideoId(item);
-    const thumb = item.thumbnail || '';
+    // ⚠️ SÉCURITÉ : Sanitiser le thumbnail avant utilisation
+    const rawThumb = item.thumbnail || '';
+    const thumb = sanitizeURL(rawThumb) || '';
+
     if (currentYTBlobUrl) { URL.revokeObjectURL(currentYTBlobUrl); currentYTBlobUrl = null; }
     ytCurrentIndex = index;
     ytCurrentVideo = { videoId, title:item.title||'', artist:item.uploaderName||'', thumbnail:thumb };
     ytMode = true;
     Player.pause();
+
+    // textContent pour title et artist : sûr
     playerTitle.textContent  = item.title || '';
     playerArtist.textContent = item.uploaderName || '';
-    playerArtwork.innerHTML  = `<img src="${thumb}" alt="">`;
+
+    // Artwork via DOM API
+    if (thumb) {
+      const img = document.createElement('img');
+      img.src = thumb;
+      img.alt = '';
+      playerArtwork.innerHTML = '';
+      playerArtwork.appendChild(img);
+    }
+
     btnPlay.classList.add('is-playing');
     playerFavorite.style.display = 'none';
     $$('.yt-result-item').forEach(el => el.classList.remove('yt-playing'));
@@ -999,40 +1202,40 @@ document.addEventListener('visibilitychange', () => {
     if (el) el.classList.add('yt-playing');
     showToast('Chargement...');
 
-if (shouldPreferDirectYouTubePlayback()) {
-  showToast('Lecture via YouTube...');
-  playYouTubeIFrame(videoId, index);
-  return;
-}
-
-try {
-  const blobUrl = await downloadYouTubeAsBlobUrl(videoId);
-  if (blobUrl) {
-    currentYTBlobUrl = blobUrl;
-    const ok = await Player.playExternal(blobUrl);
-    if (ok) {
-      if (ytPlayer && typeof ytPlayer.stopVideo === 'function') {
-        ytPlayer.stopVideo();
-      }
-      updateYTMediaSession();
-      showToast('');
+    if (shouldPreferDirectYouTubePlayback()) {
+      showToast('Lecture via YouTube...');
+      playYouTubeIFrame(videoId, index);
       return;
     }
-  }
-} catch(e) { console.error('Blob download failed:', e); }
+
+    try {
+      const blobUrl = await downloadYouTubeAsBlobUrl(videoId);
+      if (blobUrl) {
+        currentYTBlobUrl = blobUrl;
+        const ok = await Player.playExternal(blobUrl);
+        if (ok) {
+          if (ytPlayer && typeof ytPlayer.stopVideo === 'function') {
+            ytPlayer.stopVideo();
+          }
+          updateYTMediaSession();
+          showToast('');
+          return;
+        }
+      }
+    } catch(e) { console.error('Blob download failed:', e); }
     showToast('Lecture via YouTube...');
     playYouTubeIFrame(videoId, index);
   }
 
   function playYouTubeIFrame(videoId, index) {
-  stopYTProgress();
-  syncYTAPIState();
+    stopYTProgress();
+    syncYTAPIState();
 
-  if (ytPlayer && typeof ytPlayer.loadVideoById === 'function') {
-    ytPlayer.loadVideoById(videoId);
-    setTimeout(() => {
-      try { ytPlayer.playVideo(); } catch (_) {}
-    }, 150);
+    if (ytPlayer && typeof ytPlayer.loadVideoById === 'function') {
+      ytPlayer.loadVideoById(videoId);
+      setTimeout(() => {
+        try { ytPlayer.playVideo(); } catch (_) {}
+      }, 150);
     } else {
       const container = document.getElementById('ytPlayerContainer');
       const old = document.getElementById('ytPlayer');
@@ -1040,33 +1243,30 @@ try {
       const div = document.createElement('div');
       div.id = 'ytPlayer';
       container.appendChild(div);
-      if (!ytAPIReady && !syncYTAPIState()) {
-  showToast('YouTube API non prête');
-  return;
-}
+      if (!ytAPIReady && !syncYTAPIState()) { showToast('YouTube API non prête'); return; }
       ytPlayer = new YT.Player('ytPlayer', {
-  height: '1',
-  width: '1',
-  videoId,
-  playerVars: {
-    autoplay: 1,
-    controls: 0,
-    playsinline: 1,
-    disablekb: 1,
-    origin: window.location.origin
-  },
-  events: {
-    onReady: (e) => {
-      try {
-        e.target.playVideo();
-        setTimeout(() => {
-          try { e.target.playVideo(); } catch (_) {}
-        }, 250);
-      } catch (_) {}
-    },
-    onStateChange: onYTStateChange
-  },
-});
+        height: '1',
+        width: '1',
+        videoId,
+        playerVars: {
+          autoplay: 1,
+          controls: 0,
+          playsinline: 1,
+          disablekb: 1,
+          origin: window.location.origin
+        },
+        events: {
+          onReady: (e) => {
+            try {
+              e.target.playVideo();
+              setTimeout(() => {
+                try { e.target.playVideo(); } catch (_) {}
+              }, 250);
+            } catch (_) {}
+          },
+          onStateChange: onYTStateChange
+        },
+      });
     }
     startYTProgress();
     updateYTMediaSession();
@@ -1110,20 +1310,27 @@ try {
     if (currentYTBlobUrl) { URL.revokeObjectURL(currentYTBlobUrl); currentYTBlobUrl = null; }
   }
 
+  /**
+   * Rendu des résultats YouTube.
+   * ⚠️ SÉCURITÉ : esc() sur title, channel, thumbnails sanitisées
+   */
   function renderYTResults(items) {
     ytSearchResults = items;
     if (!items.length) { ytResultsContainer.innerHTML = '<p class="empty-state">Aucun résultat.</p>'; return; }
     ytResultsContainer.innerHTML = items.map((item,i) => {
-      const videoId = getVideoId(item), thumb = item.thumbnail||'';
+      const videoId = getVideoId(item);
+      // ⚠️ SÉCURITÉ : Sanitiser l'URL du thumbnail externe
+      const thumb = sanitizeURL(item.thumbnail||'') || '';
       const saved = userTracks.some(t => t.youtubeId===videoId);
-      return `<div class="yt-result-item${ytCurrentVideo?.videoId===videoId?' yt-playing':''}" data-index="${i}">
+      const isPlaying = ytCurrentVideo?.videoId===videoId;
+      return `<div class="yt-result-item${isPlaying?' yt-playing':''}" data-index="${i}">
         <div class="yt-result-thumb">
-          <img src="${thumb}" alt="" loading="lazy">
+          ${thumb ? `<img src="${esc(thumb)}" alt="" loading="lazy">` : ''}
           <div class="yt-play-overlay"><svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>
         </div>
         <div class="yt-result-info">
-          <div class="yt-result-title">${escapeHTML(item.title||'')}</div>
-          <div class="yt-result-channel">${escapeHTML(item.uploaderName||'')}</div>
+          <div class="yt-result-title">${esc(item.title||'')}</div>
+          <div class="yt-result-channel">${esc(item.uploaderName||'')}</div>
         </div>
         <div class="yt-result-actions">
           <button class="yt-save-btn${saved?' yt-saved':''}" data-index="${i}" title="${saved?'Déjà sauvegardé':'Sauvegarder hors-ligne'}">
@@ -1148,7 +1355,9 @@ try {
         e.stopPropagation();
         const videoId = getVideoId(ytSearchResults[parseInt(btn.dataset.index)]);
         if (!videoId) { showToast('Lien introuvable'); return; }
-        try { await navigator.clipboard.writeText(`https://www.youtube.com/watch?v=${videoId}`); btn.classList.add('yt-copied'); setTimeout(()=>btn.classList.remove('yt-copied'),1000); showToast('Lien copié'); }
+        // ⚠️ SÉCURITÉ : Construction sûre de l'URL YouTube (encodeURIComponent)
+        const ytUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+        try { await navigator.clipboard.writeText(ytUrl); btn.classList.add('yt-copied'); setTimeout(()=>btn.classList.remove('yt-copied'),1000); showToast('Lien copié'); }
         catch { showToast('Impossible de copier'); }
       });
     });
@@ -1156,7 +1365,9 @@ try {
 
   async function saveYouTubeOffline(index, btn) {
     const item = ytSearchResults[index]; if (!item) return;
-    const videoId = getVideoId(item), thumb = item.thumbnail||'';
+    const videoId = getVideoId(item);
+    // ⚠️ SÉCURITÉ : Sanitiser thumbnail
+    const thumb = sanitizeURL(item.thumbnail||'') || '';
     if (userTracks.some(t=>t.youtubeId===videoId)) { showToast('Déjà dans la bibliothèque'); return; }
     btn.classList.add('yt-saving'); btn.innerHTML='<div class="spinner"></div>'; btn.disabled=true;
     try {
@@ -1175,8 +1386,24 @@ try {
       let title = pipedTitle||item.title||'', artist = pipedUploader||item.uploaderName||'';
       const dm = title.match(/^(.+?)\s*[-–—]\s*(.+)$/);
       if (dm) { artist=dm[1].trim(); title=dm[2].trim(); }
+
+      // ⚠️ SÉCURITÉ : Valider la cover thumbnail avant stockage
       let coverArt = null;
-      try { const tr=await fetch(thumb); if(tr.ok){const tb=await tr.blob();coverArt=await new Promise(r=>{const rd=new FileReader();rd.onload=()=>r(rd.result);rd.onerror=()=>r(null);rd.readAsDataURL(tb);}); } } catch {}
+      if (thumb) {
+        try {
+          const tr = await fetchWithTimeout(thumb, {}, 10000);
+          if (tr.ok) {
+            const contentType = tr.headers.get('content-type') || '';
+            if (contentType.startsWith('image/')) {
+              const tb = await tr.blob();
+              coverArt = await new Promise(r=>{const rd=new FileReader();rd.onload=()=>r(rd.result);rd.onerror=()=>r(null);rd.readAsDataURL(tb);});
+              // Vérifier que c'est bien data:image/
+              if (coverArt && !coverArt.startsWith('data:image/')) coverArt = null;
+            }
+          }
+        } catch {}
+      }
+
       const meta = { id:'yt-'+videoId+'-'+Date.now(), title, artist, album:'', duration:Math.round(duration||pipedDuration||0), genre:'', color:randColor(), userImported:true, fileName:`${videoId}.${ext}`, importedAt:Date.now(), coverArt, youtubeId:videoId };
       await DB.saveUserTrack(meta, blob); userTracks.push(meta);
       btn.classList.remove('yt-saving'); btn.classList.add('yt-saved');
@@ -1201,16 +1428,23 @@ try {
         const sorted = data.audioStreams.filter(s=>s.url&&s.mimeType).sort((a,b)=>(b.bitrate||0)-(a.bitrate||0));
         if(!sorted.length) continue;
         const stream = sorted[0];
-        let audioUrl = stream.url;
+        // ⚠️ SÉCURITÉ : Valider l'URL du stream
+        let audioUrl = sanitizeURL(stream.url);
+        if (!audioUrl) continue;
         try { const t=await fetchWithTimeout(audioUrl,{method:'HEAD'},8000); if(!t.ok) throw new Error(); }
         catch { audioUrl=`${inst}/proxy?url=${encodeURIComponent(audioUrl)}`; }
         const ar = await fetchWithTimeout(audioUrl, {}, 30000); if(!ar.ok) continue;
+        const contentType = ar.headers.get('content-type') || '';
+        if (!contentType.startsWith('audio/') && !contentType.startsWith('video/') && !contentType.includes('octet-stream')) continue;
         const blob = await ar.blob(); if(!blob||blob.size<10000) continue;
         return { blob, mimeType:stream.mimeType, pipedTitle:data.title, pipedUploader:data.uploader, pipedDuration:data.duration };
-      } catch(e) { console.warn('Piped',inst,e.name==='AbortError'?'timeout':e.message); }
+      } catch(e) {
+        if (e.name !== 'AbortError') console.error('Piped download error:', inst);
+      }
     }
     throw new Error('Piped: aucun serveur disponible');
   }
+
   async function downloadFromInvidious(videoId, onProgress) {
     const invs = await getInvidiousInstances();
     for (let i=0; i<invs.length; i++) {
@@ -1222,11 +1456,13 @@ try {
         const data = await r.json();
         const fmts = (data.adaptiveFormats||[]).filter(f=>f.type?.startsWith('audio/')&&f.itag).sort((a,b)=>(parseInt(b.bitrate)||0)-(parseInt(a.bitrate)||0));
         if(!fmts.length) continue;
-        const url = `${inst}/latest_version?id=${videoId}&itag=${fmts[0].itag}&local=true`;
+        const url = `${inst}/latest_version?id=${encodeURIComponent(videoId)}&itag=${encodeURIComponent(fmts[0].itag)}&local=true`;
         const ar = await fetchWithTimeout(url, {}, 35000); if(!ar.ok) continue;
         const blob = await ar.blob(); if(!blob||blob.size<10000) continue;
         return { blob, mimeType:fmts[0].type.split(';')[0], pipedTitle:data.title, pipedUploader:data.author, pipedDuration:data.lengthSeconds };
-      } catch(e) { console.warn('Invidious',inst,e.name==='AbortError'?'timeout':e.message); }
+      } catch(e) {
+        if (e.name !== 'AbortError') console.error('Invidious download error:', inst);
+      }
     }
     throw new Error('Aucun serveur disponible');
   }
@@ -1244,8 +1480,8 @@ try {
     ytResultsContainer.innerHTML = '<div class="yt-loading"><div class="spinner"></div></div>';
     try { renderYTResults(await searchYouTube(q)); }
     catch(err) {
-      ytResultsContainer.innerHTML = `<p class="empty-state" style="color:var(--danger)">${escapeHTML(err.message)}</p>`;
-      showToast('Erreur: '+err.message);
+      ytResultsContainer.innerHTML = `<p class="empty-state" style="color:var(--danger)">${esc(err.message)}</p>`;
+      showToast('Erreur: '+err.message.slice(0,60));
     }
   }
   ytSearchBtn.addEventListener('click', doYTSearch);
@@ -1254,7 +1490,7 @@ try {
   // ===== Service Worker =====
   if ('serviceWorker' in navigator) {
     try { await navigator.serviceWorker.register('./sw.js'); }
-    catch(e) { console.warn('SW failed:', e); }
+    catch(e) { /* SW optionnel — échec silencieux */ }
   }
 
   // ===== Init =====
@@ -1265,5 +1501,4 @@ try {
   refreshHomeView();
   refreshImportView();
   volumeFill.style.width = `${Player.getVolume()*100}%`;
-  console.log('WAVE ready');
 })();
