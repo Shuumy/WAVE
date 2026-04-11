@@ -145,17 +145,6 @@
       <!-- ACCUEIL -->
       <section class="view active" id="viewHome">
         <h2 class="view-title">Accueil</h2>
-        <div class="search-bar" style="margin-bottom:28px">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" id="homeSearchInput" placeholder="Titre, artiste ou album..." autocomplete="off" maxlength="200">
-        </div>
-        <div class="track-list" id="homeSearchResults" hidden></div>
-        <div id="popularSection" class="section">
-          <h3 class="section-title">Ma musique</h3>
-          <div class="track-list" id="popularTracks">
-            <p class="empty-state">Aucun morceau. Va dans Importer pour ajouter ta musique.</p>
-          </div>
-        </div>
         <div id="recentSection" class="section">
           <h3 class="section-title">Récemment joués</h3>
           <div class="track-list" id="recentTracks">
@@ -183,6 +172,11 @@
       <!-- BIBLIOTHÈQUE -->
       <section class="view" id="viewLibrary">
         <h2 class="view-title">Bibliothèque</h2>
+        <div class="search-bar library-search-bar" id="librarySearchBar" style="margin-bottom:16px">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="librarySearchInput" placeholder="Rechercher dans la bibliothèque..." autocomplete="off" maxlength="200">
+          <button class="library-search-clear" id="librarySearchClear" hidden aria-label="Effacer">✕</button>
+        </div>
         <div class="library-tabs">
           <button class="tab-btn active" data-tab="all">Tout</button>
           <button class="tab-btn" data-tab="favorites">Favoris</button>
@@ -213,10 +207,6 @@
         <div id="importProgress" hidden>
           <div class="import-progress-bar"><div class="import-progress-fill" id="importProgressFill"></div></div>
           <p class="import-progress-text" id="importProgressText">Importation...</p>
-        </div>
-        <div class="section" id="importedSection" hidden>
-          <h3 class="section-title">Mes fichiers importés</h3>
-          <div class="track-list" id="importedTracks"></div>
         </div>
       </section>
     </main>
@@ -293,6 +283,72 @@
         </div>
       </div>
     </footer>
+  </div>
+
+  <!-- Now Playing Screen -->
+  <div class="now-playing-screen" id="nowPlayingScreen" hidden>
+    <button class="now-playing-close" id="nowPlayingClose" aria-label="Réduire">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
+    <div class="now-playing-artwork-wrap" id="nowPlayingArtwork">
+      <svg viewBox="0 0 200 200" width="48" height="48"><path d="M 87 36 L 87 108 A 13 13 0 0 1 113 108 L 113 36" stroke="#404040" stroke-width="12" fill="none" stroke-linecap="round" stroke-linejoin="round"/><line x1="100" y1="121" x2="100" y2="170" stroke="#404040" stroke-width="12" stroke-linecap="round"/></svg>
+    </div>
+    <div class="now-playing-info">
+      <div class="now-playing-info-text">
+        <div class="now-playing-title" id="nowPlayingTitle">Aucun morceau</div>
+        <div class="now-playing-artist" id="nowPlayingArtist">—</div>
+      </div>
+      <button class="icon-btn now-playing-fav" id="nowPlayingFav">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+      </button>
+    </div>
+    <div class="now-playing-progress-wrap">
+      <div class="progress-bar np-progress-bar" id="npProgressBar">
+        <div class="progress-fill" id="npProgressFill"><div class="progress-thumb"></div></div>
+      </div>
+      <div class="now-playing-times">
+        <span id="npCurrentTime">0:00</span>
+        <span id="npTotalTime">0:00</span>
+      </div>
+    </div>
+    <div class="now-playing-controls">
+      <button class="icon-btn" id="npBtnShuffle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+      </button>
+      <button class="icon-btn" id="npBtnPrev">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
+      </button>
+      <button class="play-btn" id="npBtnPlay">
+        <svg class="icon-play"  viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        <svg class="icon-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+      </button>
+      <button class="icon-btn" id="npBtnNext">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+      </button>
+      <button class="icon-btn" id="npBtnRepeat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Track Options Sheet -->
+  <div class="options-overlay" id="optionsOverlay" hidden>
+    <div class="options-sheet" id="optionsSheet">
+      <div class="options-header" id="optionsHeader">
+        <div class="options-artwork" id="optionsArtwork"></div>
+        <div class="options-meta">
+          <div class="options-title" id="optionsTitle"></div>
+          <div class="options-artist" id="optionsArtist"></div>
+        </div>
+      </div>
+      <div class="options-list" id="optionsList"></div>
+    </div>
+  </div>
+
+  <!-- Portrait Lock Overlay -->
+  <div class="portrait-lock-overlay" id="portraitLockOverlay">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+    <p>Tourne ton téléphone en mode portrait</p>
   </div>
 
   <!-- Toast -->

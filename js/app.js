@@ -65,7 +65,6 @@
   // ═══════════════════════════════════════════════════
   const navBtns           = $$('.nav-btn');
   const views             = $$('.view');
-  const homeSearchInput   = $('#homeSearchInput');
   const playerTitle       = $('#playerTitle');
   const playerArtist      = $('#playerArtist');
   const playerArtwork     = $('#playerArtwork');
@@ -110,7 +109,11 @@
   let currentPlaylistView = null;
   let selectMode = false;
   let selectedTrackIds = new Set();
-  let librarySort = 'date';
+  let librarySort = { key: 'date', dir: 'desc' };
+  let librarySearchQuery = '';
+  let playlistSort = { key: 'default', dir: 'asc' };
+  let shuffleActive = false;
+  let repeatMode = 'none';
 
   // ===== Confirm Dialog =====
   function showConfirm(message) {
@@ -275,50 +278,215 @@
   });
 
   // ===== Sort =====
-  function applySort(tracks) {
+  const SORT_OPTIONS = [
+    { key:'date',     label:"Date d'ajout" },
+    { key:'year',     label:'Date de sortie' },
+    { key:'duration', label:'Durée' },
+    { key:'title',    label:'Titre' },
+    { key:'artist',   label:'Artiste' },
+  ];
+  function applySort(tracks, sortState) {
+    const st = sortState || librarySort;
+    if (st.key === 'default') return [...tracks]; // ordre original de la playlist
     const s = [...tracks];
-    if (librarySort === 'title')  s.sort((a,b) => a.title.localeCompare(b.title));
-    else if (librarySort === 'artist') s.sort((a,b) => a.artist.localeCompare(b.artist));
-    else s.sort((a,b) => (b.importedAt||0) - (a.importedAt||0));
+    const asc = st.dir === 'asc';
+    s.sort((a, b) => {
+      let va, vb;
+      switch (st.key) {
+        case 'title':    va = transliterate(a.title);  vb = transliterate(b.title);  break;
+        case 'artist':   va = transliterate(a.artist); vb = transliterate(b.artist); break;
+        case 'duration': va = a.duration || 0;         vb = b.duration || 0;         break;
+        case 'year':     va = a.releaseYear || 0;      vb = b.releaseYear || 0;      break;
+        default:         va = a.importedAt || 0;       vb = b.importedAt || 0;       break;
+      }
+      if (typeof va === 'string') return asc ? va.localeCompare(vb) : vb.localeCompare(va);
+      return asc ? va - vb : vb - va;
+    });
     return s;
   }
-  function renderSortRow(container) {
+  function renderSortRow(container, sortState, onSortChange) {
+    const st = sortState || librarySort;
+    const onChange = onSortChange || (() => refreshLibraryView());
     const row = document.createElement('div');
     row.className = 'sort-row';
-    // Contenu statique — pas de données utilisateur
-    row.innerHTML = `
-      <span class="sort-label">Trier :</span>
-      <button class="sort-btn ${librarySort==='date'?'active':''}" data-sort="date">Date d'ajout</button>
-      <button class="sort-btn ${librarySort==='title'?'active':''}" data-sort="title">Titre A→Z</button>
-      <button class="sort-btn ${librarySort==='artist'?'active':''}" data-sort="artist">Artiste A→Z</button>`;
-    row.querySelectorAll('.sort-btn').forEach(b => b.addEventListener('click', () => { librarySort = b.dataset.sort; refreshLibraryView(); }));
+    const label = document.createElement('span');
+    label.className = 'sort-label';
+    label.textContent = 'Trier :';
+    row.appendChild(label);
+    SORT_OPTIONS.forEach(({ key, label: lbl }) => {
+      const btn = document.createElement('button');
+      const isActive = st.key === key;
+      btn.className = 'sort-btn' + (isActive ? ' active' : '');
+      btn.dataset.sort = key;
+      if (isActive) {
+        const dir = document.createElement('span');
+        dir.className = 'sort-dir';
+        dir.textContent = st.dir === 'asc' ? '↑' : '↓';
+        btn.textContent = lbl;
+        btn.appendChild(dir);
+      } else {
+        btn.textContent = lbl;
+      }
+      btn.addEventListener('click', () => {
+        if (st.key === key) {
+          st.dir = st.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+          st.key = key;
+          st.dir = (key === 'title' || key === 'artist') ? 'asc' : 'desc';
+        }
+        onChange();
+      });
+      row.appendChild(btn);
+    });
     container.insertBefore(row, container.firstChild);
   }
 
-  // ===== Cover Art =====
-  function extractCoverArt(file) {
+  // ===== Translitération pour recherche multilingue =====
+  function transliterate(str) {
+    return (str || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  }
+  function searchFilter(tracks, query) {
+    if (!query) return tracks;
+    const q = transliterate(query);
+    return tracks.filter(t =>
+      transliterate(t.title).includes(q) ||
+      transliterate(t.artist).includes(q) ||
+      transliterate(t.album || '').includes(q)
+    );
+  }
+
+  // ===== Extraction complète des métadonnées (ID3 + fallback nom de fichier) =====
+  function extractAllMetadata(file) {
+    const { title: nameTitle, artist: nameArtist } = parseName(file.name);
     return new Promise((resolve) => {
-      if (!window.jsmediatags) { resolve(null); return; }
+      const fallback = { title: nameTitle, artist: nameArtist, album: '', genre: '', releaseYear: null, coverArt: null };
+      if (!window.jsmediatags) { resolve(fallback); return; }
       try {
         jsmediatags.read(file, {
           onSuccess: (tag) => {
-            const pic = tag.tags?.picture;
+            const t = tag.tags || {};
+            const title  = (t.title  || '').trim() || nameTitle;
+            const artist = (t.artist || '').trim() || nameArtist;
+            const album  = (t.album  || '').trim();
+            // Nettoyer le genre ID3v1 (ex: "(17)" → "Rock")
+            const rawGenre = (t.genre || '').trim();
+            const genre = rawGenre.replace(/^\(?\d+\)?\s*/, '').trim();
+            // Année — ID3v2.3 (TYER) ou ID3v2.4 (TDRC)
+            const yearRaw = (t.year || (t.TDRC && t.TDRC.data) || '').toString().trim();
+            const releaseYear = yearRaw ? (parseInt(yearRaw.slice(0, 4)) || null) : null;
+            // Jaquette
+            let coverArt = null;
+            const pic = t.picture;
             if (pic) {
               try {
                 const bytes = new Uint8Array(pic.data);
                 let b = '';
                 bytes.forEach(c => b += String.fromCharCode(c));
                 const dataUrl = `data:${pic.format};base64,${btoa(b)}`;
-                // Valider que c'est bien une image
-                resolve(dataUrl.startsWith('data:image/') ? dataUrl : null);
-              } catch { resolve(null); }
-            } else resolve(null);
+                if (dataUrl.startsWith('data:image/')) coverArt = dataUrl;
+              } catch {}
+            }
+            resolve({ title, artist, album, genre, releaseYear, coverArt });
           },
-          onError: () => resolve(null),
+          onError: () => resolve(fallback),
         });
-      } catch { resolve(null); }
+      } catch { resolve(fallback); }
     });
   }
+
+  // ===== Options Sheet =====
+  const optionsOverlay = $('#optionsOverlay');
+  const optionsList    = $('#optionsList');
+  const optionsArtwork = $('#optionsArtwork');
+  const optionsTitle   = $('#optionsTitle');
+  const optionsArtist  = $('#optionsArtist');
+
+  function showTrackOptions(track, ctx = {}) {
+    // Artwork
+    const artSrc = sanitizeURL(generateArtwork(track)) || generateArtwork(track);
+    optionsArtwork.innerHTML = '';
+    const img = document.createElement('img');
+    img.src = artSrc; img.alt = '';
+    optionsArtwork.appendChild(img);
+    optionsTitle.textContent  = track.title;
+    optionsArtist.textContent = track.artist;
+
+    optionsList.innerHTML = '';
+    const addItem = (icon, label, cls, handler) => {
+      const btn = document.createElement('button');
+      btn.className = 'options-item' + (cls ? ' ' + cls : '');
+      btn.innerHTML = icon;
+      const span = document.createElement('span');
+      span.textContent = label;
+      btn.appendChild(span);
+      btn.addEventListener('click', () => { closeOptionsSheet(); handler(); });
+      optionsList.appendChild(btn);
+    };
+
+    // Retirer de la playlist / Supprimer
+    if (ctx.playlistId) {
+      addItem('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+        'Retirer de la playlist', '', async () => {
+          await DB.removeTrackFromPlaylist(ctx.playlistId, track.id);
+          showToast('Retiré de la playlist');
+          ctx.onRemove?.();
+        });
+    } else {
+      addItem('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+        'Supprimer', 'danger', async () => {
+          const ok = await showConfirm(`Supprimer "${track.title}" ?`);
+          if (!ok) return;
+          await DB.removeUserTrack(track.id);
+          userTracks = userTracks.filter(t => t.id !== track.id);
+          showToast(`"${track.title}" supprimé`);
+          refreshAllViews();
+        });
+    }
+
+    // Télécharger
+    addItem('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+      'Télécharger le fichier', '', async () => {
+        try {
+          const blob = await DB.getUserAudioBlob(track.id);
+          if (!blob) { showToast('Fichier introuvable'); return; }
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = track.fileName || (track.title + '.mp3');
+          document.body.appendChild(a); a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 5000);
+          showToast('Téléchargement lancé');
+        } catch { showToast('Erreur lors du téléchargement'); }
+      });
+
+    // Copier le lien YouTube (uniquement pour les morceaux YouTube)
+    if (track.youtubeId) {
+      addItem('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+        'Copier le lien YouTube', '', async () => {
+          const ytUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(track.youtubeId)}`;
+          try { await navigator.clipboard.writeText(ytUrl); showToast('Lien copié'); }
+          catch { showToast('Impossible de copier'); }
+        });
+    }
+
+    // Partager
+    if (navigator.share) {
+      addItem('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>',
+        'Partager', '', async () => {
+          try {
+            const shareData = { title: track.title, text: `${track.artist} — ${track.title}` };
+            if (track.youtubeId) shareData.url = `https://www.youtube.com/watch?v=${encodeURIComponent(track.youtubeId)}`;
+            await navigator.share(shareData);
+          } catch (err) { if (err.name !== 'AbortError') showToast('Partage non disponible'); }
+        });
+    }
+
+    optionsOverlay.hidden = false;
+  }
+
+  function closeOptionsSheet() { optionsOverlay.hidden = true; }
+  optionsOverlay.addEventListener('click', (e) => { if (e.target === optionsOverlay) closeOptionsSheet(); });
 
   // ===== Track Element =====
   /**
@@ -336,22 +504,15 @@
     if (ct && ct.id === track.id) div.classList.add('playing');
     if (selectMode && selectedTrackIds.has(track.id)) div.classList.add('selected');
 
-    // L'artwork est soit une data:image/ URL (safe) soit une URL https: générée par generateArtwork
     const artSrc = sanitizeURL(generateArtwork(track)) || generateArtwork(track);
 
-    let actionBtn = '';
-    if (playlistId) {
-      // Contenu statique : pas d'injection
-      actionBtn = `<button class="icon-btn remove-pl-btn" title="Retirer">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>`;
-    } else {
-      actionBtn = `<button class="icon-btn playlist-add-btn" title="Ajouter à une playlist">
+    // Dans une playlist : pas de bouton "ajouter à playlist" (le menu options gère "retirer")
+    const actionBtn = playlistId ? '' : `<button class="icon-btn playlist-add-btn" title="Ajouter à une playlist">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
       </button>`;
-    }
-    const deleteBtn = showDelete ? `<button class="icon-btn delete-track-btn" title="Supprimer">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+    // Bouton options (3 points) remplace l'icône poubelle
+    const optionsBtn = (showDelete || playlistId) ? `<button class="icon-btn track-options-btn" title="Options">
+      <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
     </button>` : '';
 
     // ⚠️ SÉCURITÉ : esc() appliqué sur toutes les données dynamiques
@@ -370,7 +531,7 @@
         <button class="icon-btn fav-btn" title="Favori">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
         </button>
-        ${actionBtn}${deleteBtn}
+        ${actionBtn}${optionsBtn}
       </div>`;
 
     DB.isFavorite(track.id).then(isFav => {
@@ -392,34 +553,21 @@
       }
     });
 
-    if (playlistId) {
-      div.querySelector('.remove-pl-btn').addEventListener('click', async (e) => {
-        e.stopPropagation();
-        await DB.removeTrackFromPlaylist(playlistId, track.id);
-        wrap.style.cssText = 'transition:opacity .2s,transform .2s;opacity:0;transform:translateX(10px)';
-        setTimeout(() => { wrap.remove(); onRemoveFromPlaylist?.(); }, 200);
-        showToast('Retiré de la playlist');
-      });
-    } else {
-      div.querySelector('.playlist-add-btn').addEventListener('click', (e) => {
-        e.stopPropagation(); if (selectMode) return;
-        openPlaylistModal(track.id);
-      });
-    }
+    div.querySelector('.playlist-add-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation(); if (selectMode) return;
+      openPlaylistModal(track.id);
+    });
 
-    if (showDelete) {
-      div.querySelector('.delete-track-btn').addEventListener('click', async (e) => {
+    if (showDelete || playlistId) {
+      div.querySelector('.track-options-btn').addEventListener('click', (e) => {
         e.stopPropagation(); if (selectMode) return;
-        const ok = await showConfirm(`Supprimer "${track.title}" ?`);
-        if (!ok) return;
-        wrap.style.cssText = 'transition:opacity .2s,transform .2s;opacity:0;transform:translateX(-10px)';
-        setTimeout(async () => {
-          await DB.removeUserTrack(track.id);
-          userTracks = userTracks.filter(t => t.id !== track.id);
-          wrap.remove();
-          showToast(`"${track.title}" supprimé`);
-          refreshAllViews();
-        }, 200);
+        showTrackOptions(track, {
+          playlistId,
+          onRemove: () => {
+            wrap.style.cssText = 'transition:opacity .2s,transform .2s;opacity:0;transform:translateX(10px)';
+            setTimeout(() => { wrap.remove(); onRemoveFromPlaylist?.(); }, 200);
+          },
+        });
       });
     }
 
@@ -433,7 +581,7 @@
     div.addEventListener('touchmove', () => clearTimeout(lpTimer));
 
     div.addEventListener('click', (e) => {
-      if (e.target.closest('.fav-btn,.playlist-add-btn,.remove-pl-btn,.delete-track-btn')) return;
+      if (e.target.closest('.fav-btn,.playlist-add-btn,.track-options-btn')) return;
       if (selectMode) { toggleTrackSelect(track.id, div); return; }
       if (ytMode) exitYTMode();
       Player.setQueue(list, index);
@@ -500,62 +648,52 @@
 
   // ===== Home View =====
   async function refreshHomeView() {
-    const query = homeSearchInput?.value.toLowerCase().trim() || '';
-    const popSec   = $('#popularSection');
-    const recSec   = $('#recentSection');
-    const results  = $('#homeSearchResults');
-    const all = getAllTracks();
-
-    if (query) {
-      if (popSec) popSec.hidden = true;
-      if (recSec) recSec.hidden = true;
-      if (results) {
-        results.hidden = false;
-        const filtered = all.filter(t =>
-          t.title.toLowerCase().includes(query) ||
-          t.artist.toLowerCase().includes(query) ||
-          (t.album && t.album.toLowerCase().includes(query))
-        );
-        renderTrackList(results, filtered, { showDelete: true });
-      }
-    } else {
-      if (popSec) popSec.hidden = false;
-      if (recSec) recSec.hidden = false;
-      if (results) { results.hidden = true; results.innerHTML = ''; }
-      const pop = $('#popularTracks');
-      if (pop) {
-        if (!all.length) pop.innerHTML = '<p class="empty-state">Aucun morceau. Va dans Importer pour ajouter ta musique.</p>';
-        else renderTrackList(pop, all, { showDelete: true });
-      }
-      const recentIds = await DB.getRecent();
-      const rec = $('#recentTracks');
-      if (rec) {
-        const recentTracks = recentIds.map(r => findTrack(r.id)).filter(Boolean).slice(0, 8);
-        if (!recentTracks.length) rec.innerHTML = '<p class="empty-state">Aucun morceau joué récemment.</p>';
-        else renderTrackList(rec, recentTracks);
-      }
+    const recentIds = await DB.getRecent();
+    const rec = $('#recentTracks');
+    if (rec) {
+      const recentTracks = recentIds.map(r => findTrack(r.id)).filter(Boolean).slice(0, 8);
+      if (!recentTracks.length) rec.innerHTML = '<p class="empty-state">Aucun morceau joué récemment.</p>';
+      else renderTrackList(rec, recentTracks);
     }
   }
-  homeSearchInput?.addEventListener('input', () => refreshHomeView());
 
   // ===== Library View =====
+  // Wiring search bar
+  const libSearchInput = $('#librarySearchInput');
+  const libSearchClear = $('#librarySearchClear');
+  const libSearchBar   = $('#librarySearchBar');
+
+  libSearchInput?.addEventListener('input', () => {
+    librarySearchQuery = libSearchInput.value;
+    libSearchClear.hidden = !librarySearchQuery;
+    const tab = $('.library-tabs .tab-btn.active')?.dataset.tab;
+    if (tab !== 'playlists') refreshLibraryView();
+  });
+  libSearchClear?.addEventListener('click', () => {
+    libSearchInput.value = ''; librarySearchQuery = '';
+    libSearchClear.hidden = true;
+    refreshLibraryView();
+  });
+
   async function refreshLibraryView() {
     const tab = $('.library-tabs .tab-btn.active')?.dataset.tab;
     const content = $('#libraryContent');
+    // Masquer la searchbar pour les playlists
+    if (libSearchBar) libSearchBar.hidden = (tab === 'playlists');
     if (tab === 'all') {
       content.innerHTML = '<div class="track-list" id="libraryTracks"></div>';
       renderSortRow(content);
-      const tracks = applySort(getAllTracks());
+      const tracks = searchFilter(applySort(getAllTracks()), librarySearchQuery);
       const c = $('#libraryTracks');
-      if (!tracks.length) c.innerHTML = '<p class="empty-state">Aucun morceau importé.</p>';
+      if (!tracks.length) c.innerHTML = `<p class="empty-state">${librarySearchQuery ? 'Aucun résultat.' : 'Aucun morceau importé.'}</p>`;
       else renderTrackList(c, tracks, { showDelete: true });
     } else if (tab === 'favorites') {
       content.innerHTML = '<div class="track-list" id="libraryTracks"></div>';
       renderSortRow(content);
       const favs = await DB.getFavorites();
-      const tracks = applySort(favs.map(f => findTrack(f.id)).filter(Boolean));
+      const tracks = searchFilter(applySort(favs.map(f => findTrack(f.id)).filter(Boolean)), librarySearchQuery);
       const c = $('#libraryTracks');
-      if (!tracks.length) c.innerHTML = '<p class="empty-state">Aucun favori.</p>';
+      if (!tracks.length) c.innerHTML = `<p class="empty-state">${librarySearchQuery ? 'Aucun résultat.' : 'Aucun favori.'}</p>`;
       else renderTrackList(c, tracks, { showDelete: true });
     } else if (tab === 'playlists') {
       if (currentPlaylistView) await renderPlaylistDetail(currentPlaylistView);
@@ -583,11 +721,14 @@
       const tracks = pl.trackIds.map(id => findTrack(id)).filter(Boolean);
       const total = tracks.reduce((s,t) => s + (t.duration||0), 0);
       const coverSrc = pl.coverImage ? sanitizeURL(pl.coverImage) || '' : '';
-      html += `<div class="playlist-card" style="background:${esc(pl.coverColor)}" data-playlist-id="${esc(pl.id)}">
+      const hasCover = !!coverSrc;
+      html += `<div class="playlist-card${hasCover ? ' has-cover' : ''}" style="background:${esc(pl.coverColor)}" data-playlist-id="${esc(pl.id)}">
         <button class="playlist-card-delete" data-pl-delete="${esc(pl.id)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-        ${coverSrc ? `<img class="playlist-card-cover-img" src="${esc(coverSrc)}" alt="">` : ''}
-        <div class="playlist-card-name">${esc(pl.name)}</div>
-        <div class="playlist-card-count">${pl.trackIds.length} morceau${pl.trackIds.length!==1?'x':''} · ${formatTotalDuration(total)}</div>
+        ${hasCover ? `<img class="playlist-card-cover-img" src="${esc(coverSrc)}" alt="">` : ''}
+        <div class="playlist-card-info">
+          <div class="playlist-card-name">${esc(pl.name)}</div>
+          <div class="playlist-card-count">${pl.trackIds.length} morceau${pl.trackIds.length!==1?'x':''} · ${formatTotalDuration(total)}</div>
+        </div>
       </div>`;
     });
     html += '</div><div style="text-align:center;margin-top:20px"><button class="import-btn" id="createPlaylistFromLib">+ Nouvelle playlist</button></div>';
@@ -646,13 +787,20 @@
           </div>
         </div>
       </div>
+      <div id="playlistSortZone"></div>
       <div class="track-list" id="playlistTracks"></div>`;
 
     // Injection sécurisée du nom via textContent
     $('#playlistNameSpan').textContent = pl.name;
 
-    if (!tracks.length) $('#playlistTracks').innerHTML = '<p class="empty-state">Aucun morceau. Clique sur "Ajouter des morceaux".</p>';
-    else renderTrackList($('#playlistTracks'), tracks, { playlistId: plId, onRemoveFromPlaylist: () => renderPlaylistDetail(plId) });
+    const plTracksContainer = $('#playlistTracks');
+    if (!tracks.length) {
+      plTracksContainer.innerHTML = '<p class="empty-state">Aucun morceau. Clique sur "Ajouter des morceaux".</p>';
+    } else {
+      const sorted = applySort(tracks, playlistSort);
+      renderTrackList(plTracksContainer, sorted, { playlistId: plId, onRemoveFromPlaylist: () => renderPlaylistDetail(plId) });
+      renderSortRow($('#playlistSortZone'), playlistSort, () => renderPlaylistDetail(plId));
+    }
     $('#playlistBack').addEventListener('click', () => { currentPlaylistView = null; refreshLibraryView(); });
     $('#playlistRenameBtn').addEventListener('click', async () => {
       const raw = prompt('Nouveau nom:', pl.name);
@@ -743,13 +891,7 @@
   closePlaylistSearchModal.addEventListener('click', () => { playlistSearchModal.hidden = true; });
   playlistSearchModal.addEventListener('click', (e) => { if (e.target === playlistSearchModal) playlistSearchModal.hidden = true; });
 
-  async function refreshImportView() {
-    const section = $('#importedSection');
-    const container = $('#importedTracks');
-    if (!userTracks.length) { section.hidden = true; return; }
-    section.hidden = false;
-    renderTrackList(container, userTracks, { showDelete: true });
-  }
+  function refreshImportView() { /* section "Mes fichiers importés" supprimée */ }
 
   function refreshAllViews() {
     refreshHomeView();
@@ -768,6 +910,121 @@
     });
   });
 
+  // ===== Now Playing Screen =====
+  const nowPlayingScreen = $('#nowPlayingScreen');
+  const nowPlayingClose  = $('#nowPlayingClose');
+  const nowPlayingArtwork= $('#nowPlayingArtwork');
+  const nowPlayingTitle  = $('#nowPlayingTitle');
+  const nowPlayingArtist = $('#nowPlayingArtist');
+  const nowPlayingFav    = $('#nowPlayingFav');
+  const npProgressBar    = $('#npProgressBar');
+  const npProgressFill   = $('#npProgressFill');
+  const npCurrentTime    = $('#npCurrentTime');
+  const npTotalTime      = $('#npTotalTime');
+  const npBtnShuffle     = $('#npBtnShuffle');
+  const npBtnPrev        = $('#npBtnPrev');
+  const npBtnPlay        = $('#npBtnPlay');
+  const npBtnNext        = $('#npBtnNext');
+  const npBtnRepeat      = $('#npBtnRepeat');
+
+  function openNowPlaying() {
+    nowPlayingScreen.hidden = false;
+    document.body.classList.add('np-open');
+    // Sync current state into NP screen
+    const track = Player.getCurrentTrack();
+    if (track) {
+      nowPlayingTitle.textContent  = track.title;
+      nowPlayingArtist.textContent = track.artist;
+      const artImg = document.createElement('img');
+      artImg.src = sanitizeURL(generateArtwork(track)) || generateArtwork(track);
+      artImg.alt = '';
+      nowPlayingArtwork.innerHTML = '';
+      nowPlayingArtwork.appendChild(artImg);
+      DB.isFavorite(track.id).then(isFav => {
+        nowPlayingFav.classList.toggle('active', isFav);
+        nowPlayingFav.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
+      });
+    }
+    npBtnPlay.classList.toggle('is-playing', Player.getIsPlaying());
+    npBtnShuffle.classList.toggle('active', shuffleActive);
+    updateRepeatButtons(repeatMode);
+  }
+  function closeNowPlaying() {
+    nowPlayingScreen.hidden = true;
+    document.body.classList.remove('np-open');
+  }
+  nowPlayingClose.addEventListener('click', closeNowPlaying);
+
+  // Swipe-up on player bar → open Now Playing
+  const playerBar = $('#playerBar');
+  let swipeStartY = null;
+  playerBar.addEventListener('touchstart', (e) => {
+    swipeStartY = e.touches[0].clientY;
+  }, { passive: true });
+  playerBar.addEventListener('touchend', (e) => {
+    if (swipeStartY === null) return;
+    const dy = swipeStartY - e.changedTouches[0].clientY;
+    if (dy > 35) openNowPlaying();
+    swipeStartY = null;
+  }, { passive: true });
+
+  // Swipe-down on NP screen → close
+  let npSwipeY = null;
+  nowPlayingScreen.addEventListener('touchstart', (e) => {
+    if (e.target.closest('.np-progress-bar,.now-playing-controls')) return;
+    npSwipeY = e.touches[0].clientY;
+  }, { passive: true });
+  nowPlayingScreen.addEventListener('touchend', (e) => {
+    if (npSwipeY === null) return;
+    const dy = e.changedTouches[0].clientY - npSwipeY;
+    if (dy > 60) closeNowPlaying();
+    npSwipeY = null;
+  }, { passive: true });
+
+  // Click on track info in mini-player → open Now Playing
+  const playerTrackInfoArea = $('.player-track-info');
+  playerTrackInfoArea.addEventListener('click', (e) => {
+    if (e.target.closest('.favorite-btn')) return;
+    openNowPlaying();
+  });
+
+  // NP screen controls mirror main player
+  npBtnPlay.addEventListener('click', () => btnPlay.click());
+  npBtnPrev.addEventListener('click', () => btnPrev.click());
+  npBtnNext.addEventListener('click', () => btnNext.click());
+  npBtnShuffle.addEventListener('click', () => btnShuffle.click());
+  npBtnRepeat.addEventListener('click', () => btnRepeat.click());
+
+  // NP screen favorite button
+  nowPlayingFav.addEventListener('click', async () => {
+    const track = Player.getCurrentTrack(); if (!track) return;
+    const isFav = await DB.toggleFavorite(track.id);
+    nowPlayingFav.classList.toggle('active', isFav);
+    nowPlayingFav.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
+    playerFavorite.classList.toggle('active', isFav);
+    playerFavorite.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
+    showToast(isFav ? 'Ajouté aux favoris' : 'Retiré des favoris');
+  });
+
+  // NP progress bar seek
+  let npDragging = false;
+  function npSeekFrac(e) {
+    const r = npProgressBar.getBoundingClientRect();
+    const x = e.touches ? e.touches[0].clientX : e.clientX;
+    const f = Math.max(0, Math.min(1, (x - r.left) / r.width));
+    npProgressFill.style.width = `${f * 100}%`;
+    return f;
+  }
+  npProgressBar.addEventListener('mousedown', (e) => {
+    npDragging = true; npProgressBar.classList.add('dragging'); Player.seek(npSeekFrac(e));
+    const mv = (ev) => Player.seek(npSeekFrac(ev));
+    const up = () => { npDragging = false; npProgressBar.classList.remove('dragging'); document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); };
+    document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
+  });
+  npProgressBar.addEventListener('touchstart', (e) => { e.preventDefault(); npDragging = true; npProgressBar.classList.add('dragging'); Player.seek(npSeekFrac(e)); }, { passive: false });
+  npProgressBar.addEventListener('touchmove',  (e) => { e.preventDefault(); if (npDragging) Player.seek(npSeekFrac(e)); }, { passive: false });
+  npProgressBar.addEventListener('touchend',   () => { npDragging = false; npProgressBar.classList.remove('dragging'); });
+
   // ===== Player Events =====
   Player.on('trackchange', async (track) => {
     // textContent pour title et artist : sûr sans esc()
@@ -781,9 +1038,21 @@
     playerArtwork.innerHTML = '';
     playerArtwork.appendChild(img);
 
+    // Sync NP screen if open
+    nowPlayingTitle.textContent  = track.title;
+    nowPlayingArtist.textContent = track.artist;
+    const npImg = document.createElement('img');
+    npImg.src = sanitizeURL(generateArtwork(track)) || generateArtwork(track);
+    npImg.alt = '';
+    nowPlayingArtwork.innerHTML = '';
+    nowPlayingArtwork.appendChild(npImg);
+
     const isFav = await DB.isFavorite(track.id);
     playerFavorite.classList.toggle('active', isFav);
     playerFavorite.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
+    nowPlayingFav.classList.toggle('active', isFav);
+    nowPlayingFav.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
+
     $$('.track-item').forEach(el => {
       const isThis = el.dataset.trackId === track.id;
       el.classList.toggle('playing', isThis);
@@ -797,13 +1066,24 @@
       navigator.mediaSession.metadata = new MediaMetadata({ title: track.title, artist: track.artist, album: track.album||'' });
     }
   });
-  Player.on('statechange', ({ playing }) => { btnPlay.classList.toggle('is-playing', playing); });
+  Player.on('statechange', ({ playing }) => {
+    btnPlay.classList.toggle('is-playing', playing);
+    npBtnPlay.classList.toggle('is-playing', playing);
+  });
   let isDragging = false;
   Player.on('timeupdate', ({ currentTime, duration }) => {
-    if (isDragging || !duration) return;
-    progressFill.style.width = `${(currentTime/duration)*100}%`;
-    currentTimeEl.textContent = formatDuration(currentTime);
-    totalTimeEl.textContent = formatDuration(duration);
+    if (!duration) return;
+    const pct = `${(currentTime / duration) * 100}%`;
+    if (!isDragging) {
+      progressFill.style.width = pct;
+      currentTimeEl.textContent = formatDuration(currentTime);
+      totalTimeEl.textContent   = formatDuration(duration);
+    }
+    if (!npDragging) {
+      npProgressFill.style.width = pct;
+      npCurrentTime.textContent  = formatDuration(currentTime);
+      npTotalTime.textContent    = formatDuration(duration);
+    }
   });
   Player.on('error', ({ message }) => showToast(message));
 
@@ -841,14 +1121,24 @@
     Player.next();
   });
   btnShuffle.addEventListener('click', () => {
-    const a = Player.toggleShuffle(); btnShuffle.classList.toggle('active', a);
-    showToast(a ? 'Lecture aléatoire activée' : 'Lecture aléatoire désactivée');
+    shuffleActive = Player.toggleShuffle();
+    btnShuffle.classList.toggle('active', shuffleActive);
+    npBtnShuffle.classList.toggle('active', shuffleActive);
+    showToast(shuffleActive ? 'Lecture aléatoire activée' : 'Lecture aléatoire désactivée');
   });
-  btnRepeat.addEventListener('click', () => {
-    const mode = Player.toggleRepeat(); btnRepeat.classList.toggle('active', mode !== 'none');
+  function updateRepeatButtons(mode) {
+    const active = mode !== 'none';
+    btnRepeat.classList.toggle('active', active);
+    npBtnRepeat.classList.toggle('active', active);
     const base = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>`;
-    btnRepeat.innerHTML = mode==='one' ? base+`<text x="12" y="16" font-size="8" fill="currentColor" text-anchor="middle" font-weight="bold">1</text></svg>` : base+`</svg>`;
-    showToast({ none:'Répétition désactivée', all:'Répéter tout', one:'Répéter un seul' }[mode]);
+    const svg = mode === 'one' ? base + `<text x="12" y="16" font-size="8" fill="currentColor" text-anchor="middle" font-weight="bold">1</text></svg>` : base + `</svg>`;
+    btnRepeat.innerHTML = svg;
+    npBtnRepeat.innerHTML = svg;
+  }
+  btnRepeat.addEventListener('click', () => {
+    repeatMode = Player.toggleRepeat();
+    updateRepeatButtons(repeatMode);
+    showToast({ none:'Répétition désactivée', all:'Répéter tout', one:'Répéter un seul' }[repeatMode]);
   });
 
   // Progress
@@ -955,18 +1245,17 @@
         fail++; continue;
       }
 
-      const { title, artist } = parseName(file.name);
+      const { title, artist, album, genre, releaseYear, coverArt } = await extractAllMetadata(file);
       const { valid, duration } = await validateAudio(file);
       if (!valid) { fail++; continue; }
-      const coverArt = await extractCoverArt(file);
 
       // Valider que la coverArt extraite est bien une image
       const safeCoverArt = coverArt?.startsWith('data:image/') ? coverArt : null;
 
       const meta = {
         id: 'user-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),
-        title, artist, album:'', duration:Math.round(duration),
-        genre:'', color:randColor(), userImported:true,
+        title, artist, album, duration:Math.round(duration),
+        genre, releaseYear, color:randColor(), userImported:true,
         fileName:file.name, importedAt:Date.now(), coverArt:safeCoverArt,
       };
       await DB.saveUserTrack(meta, file);
@@ -1493,12 +1782,16 @@
     catch(e) { /* SW optionnel — échec silencieux */ }
   }
 
+  // ===== Portrait Lock =====
+  if (screen.orientation && screen.orientation.lock) {
+    screen.orientation.lock('portrait').catch(() => { /* silencieux si non supporté */ });
+  }
+
   // ===== Init =====
   syncYTAPIState();
   ensureYTAPIScript();
   await loadUserTracks();
   await loadProfilePicture();
   refreshHomeView();
-  refreshImportView();
   volumeFill.style.width = `${Player.getVolume()*100}%`;
 })();
