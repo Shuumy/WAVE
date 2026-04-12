@@ -1592,18 +1592,26 @@
         const data = await r.json();
         if (!data.audioStreams?.length) continue;
         const sorted = data.audioStreams.filter(s=>s.url&&s.mimeType).sort((a,b)=>(b.bitrate||0)-(a.bitrate||0));
+        let instHost = '';
+        try { instHost = new URL(inst).hostname; } catch {}
         for (const stream of sorted.slice(0,3)) {
           try {
-            // ⚠️ SÉCURITÉ : Valider l'URL du stream avant de la fetch
-            const streamUrl = sanitizeURL(stream.url);
-            if (!streamUrl) continue;
-            const ar = await fetchWithTimeout(streamUrl, {}, 30000);
-            if (!ar.ok) continue;
-            const contentType = ar.headers.get('content-type') || '';
-            // Valider que c'est bien de l'audio
-            if (!contentType.startsWith('audio/') && !contentType.startsWith('video/') && !contentType.includes('octet-stream')) continue;
-            const blob = await ar.blob();
-            if (blob.size > 5000) return URL.createObjectURL(blob);
+            const rawUrl = sanitizeURL(stream.url);
+            if (!rawUrl) continue;
+            const isExternal = instHost && !rawUrl.includes(instHost);
+            const urlsToTry = isExternal
+              ? [`${inst}/proxy?url=${encodeURIComponent(rawUrl)}`, rawUrl]
+              : [rawUrl, `${inst}/proxy?url=${encodeURIComponent(rawUrl)}`];
+            for (const audioUrl of urlsToTry) {
+              try {
+                const ar = await fetchWithTimeout(audioUrl, {}, 30000);
+                if (!ar.ok) continue;
+                const contentType = ar.headers.get('content-type') || '';
+                if (!contentType.startsWith('audio/') && !contentType.startsWith('video/') && !contentType.includes('octet-stream')) continue;
+                const blob = await ar.blob();
+                if (blob.size > 5000) return URL.createObjectURL(blob);
+              } catch {}
+            }
           } catch {}
         }
       } catch(e) {
@@ -1893,17 +1901,35 @@
         if(!data.audioStreams?.length) continue;
         const sorted = data.audioStreams.filter(s=>s.url&&s.mimeType).sort((a,b)=>(b.bitrate||0)-(a.bitrate||0));
         if(!sorted.length) continue;
-        const stream = sorted[0];
-        // ⚠️ SÉCURITÉ : Valider l'URL du stream
-        let audioUrl = sanitizeURL(stream.url);
-        if (!audioUrl) continue;
-        try { const t=await fetchWithTimeout(audioUrl,{method:'HEAD'},8000); if(!t.ok) throw new Error(); }
-        catch { audioUrl=`${inst}/proxy?url=${encodeURIComponent(audioUrl)}`; }
-        const ar = await fetchWithTimeout(audioUrl, {}, 30000); if(!ar.ok) continue;
-        const contentType = ar.headers.get('content-type') || '';
-        if (!contentType.startsWith('audio/') && !contentType.startsWith('video/') && !contentType.includes('octet-stream')) continue;
-        const blob = await ar.blob(); if(!blob||blob.size<10000) continue;
-        return { blob, mimeType:stream.mimeType, pipedTitle:data.title, pipedUploader:data.uploader, pipedDuration:data.duration, thumbnailUrl:data.thumbnailUrl||'' };
+
+        // Hostname de l'instance pour détecter si l'URL est déjà proxifiée
+        let instHost = '';
+        try { instHost = new URL(inst).hostname; } catch {}
+
+        // Essayer les 3 meilleures qualités (comme downloadYouTubeAsBlobUrl)
+        for (const stream of sorted.slice(0, 3)) {
+          const rawUrl = sanitizeURL(stream.url);
+          if (!rawUrl) continue;
+
+          // Si l'URL est externe (CDN YouTube, non proxifiée) → proxy en premier
+          // Si déjà proxifiée par l'instance → directe en premier
+          const isExternal = instHost && !rawUrl.includes(instHost);
+          const urlsToTry = isExternal
+            ? [`${inst}/proxy?url=${encodeURIComponent(rawUrl)}`, rawUrl]
+            : [rawUrl, `${inst}/proxy?url=${encodeURIComponent(rawUrl)}`];
+
+          for (const audioUrl of urlsToTry) {
+            try {
+              const ar = await fetchWithTimeout(audioUrl, {}, 35000);
+              if (!ar.ok) continue;
+              const contentType = ar.headers.get('content-type') || '';
+              if (!contentType.startsWith('audio/') && !contentType.startsWith('video/') && !contentType.includes('octet-stream')) continue;
+              const blob = await ar.blob();
+              if (!blob || blob.size < 10000) continue;
+              return { blob, mimeType:stream.mimeType, pipedTitle:data.title, pipedUploader:data.uploader, pipedDuration:data.duration, thumbnailUrl:data.thumbnailUrl||'' };
+            } catch { /* essayer l'URL suivante */ }
+          }
+        }
       } catch(e) {
         if (e.name !== 'AbortError') console.error('Piped download error:', inst);
       }
