@@ -1336,6 +1336,11 @@
   // ===== YouTube URL Import (notube-like) =====
   const ytImportInput    = $('#ytImportInput');
   const ytImportBtn      = $('#ytImportBtn');
+  const ytPreviewCard    = $('#ytPreviewCard');
+  const ytPreviewThumb   = $('#ytPreviewThumb');
+  const ytPreviewTitleEl = $('#ytPreviewTitle');
+  const ytPreviewMetaEl  = $('#ytPreviewMeta');
+  const ytPreviewSaveBtn = $('#ytPreviewSaveBtn');
   const ytImportProgress = $('#ytImportProgress');
   const ytImportFill     = $('#ytImportFill');
   const ytImportText     = $('#ytImportText');
@@ -1360,12 +1365,78 @@
     return m ? m[1] : null;
   }
 
-  async function importFromYouTubeUrl() {
+  // Métadonnées pré-chargées lors de l'analyse (étape 1)
+  let _ytPreviewData = null;
+
+  function _fmtDuration(s) {
+    if (!s || s <= 0) return '';
+    return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+  }
+
+  // Étape 1 : analyser l'URL et afficher la fiche preview (comme notube)
+  async function analyzeYouTubeUrl() {
     const videoId = extractYouTubeVideoId(ytImportInput.value);
     if (!videoId) { showToast('URL YouTube invalide'); return; }
-    if (userTracks.some(t => t.youtubeId === videoId)) { showToast('Déjà dans la bibliothèque'); return; }
 
+    _ytPreviewData = null;
     ytImportBtn.disabled = true;
+
+    // Afficher la carte immédiatement avec la miniature YouTube (img-src:https: → ok sans fetch)
+    ytPreviewCard.hidden = false;
+    ytPreviewThumb.src = `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/hqdefault.jpg`;
+    ytPreviewTitleEl.textContent = 'Analyse...';
+    ytPreviewMetaEl.textContent = '';
+    ytPreviewSaveBtn.hidden = true;
+    ytPreviewSaveBtn.className = 'yt-preview-save-btn';
+    ytImportProgress.hidden = true;
+
+    // Récupérer titre / artiste / durée depuis Piped (juste le JSON, pas d'audio)
+    let rawTitle = '', uploader = '', duration = 0, thumbnailUrl = '';
+    for (const inst of PIPED_INSTANCES) {
+      try {
+        const r = await fetchWithTimeout(`${inst}/streams/${videoId}`, { cache:'no-cache' }, 10000);
+        if (!r.ok) continue;
+        const data = await r.json();
+        if (data.error) continue;
+        rawTitle    = data.title    || '';
+        uploader    = data.uploader || '';
+        duration    = data.duration || 0;
+        thumbnailUrl = sanitizeURL(data.thumbnailUrl || '') || '';
+        break;
+      } catch {}
+    }
+
+    ytImportBtn.disabled = false;
+
+    // Parser "Artiste - Titre" si le titre contient un tiret
+    let displayTitle = rawTitle || 'Titre inconnu';
+    let displayArtist = uploader || '';
+    const dm = rawTitle.match(/^(.+?)\s*[-–—]\s*(.+)$/);
+    if (dm) { displayArtist = dm[1].trim(); displayTitle = dm[2].trim(); }
+
+    ytPreviewTitleEl.textContent = displayTitle;
+    ytPreviewMetaEl.textContent  = displayArtist + (_fmtDuration(duration) ? ' · ' + _fmtDuration(duration) : '');
+
+    // Vérifier si déjà en bibliothèque
+    if (userTracks.some(t => t.youtubeId === videoId)) {
+      ytPreviewSaveBtn.classList.add('saved');
+      ytPreviewSaveBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg> Déjà dans la bibliothèque';
+      ytPreviewSaveBtn.disabled = true;
+    } else {
+      ytPreviewSaveBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Sauvegarder dans la bibliothèque';
+      ytPreviewSaveBtn.disabled = false;
+    }
+    ytPreviewSaveBtn.hidden = false;
+
+    _ytPreviewData = { videoId, rawTitle, title: displayTitle, artist: displayArtist, duration, thumbnailUrl };
+  }
+
+  // Étape 2 : télécharger et sauvegarder (déclenché par le bouton sur la fiche)
+  async function saveFromYouTube() {
+    if (!_ytPreviewData) return;
+    const { videoId, title, artist, duration, thumbnailUrl } = _ytPreviewData;
+
+    ytPreviewSaveBtn.disabled = true;
     ytImportProgress.hidden = false;
     ytImportFill.style.width = '10%';
     ytImportText.textContent = 'Connexion au serveur...';
@@ -1391,19 +1462,17 @@
       ytImportFill.style.width = '82%';
       ytImportText.textContent = 'Validation audio...';
 
-      const { blob, mimeType, pipedTitle, pipedUploader, pipedDuration, thumbnailUrl } = res;
-      const { duration } = await validateAudio(blob);
+      const { blob, mimeType, pipedTitle, pipedUploader, pipedDuration } = res;
+      const { duration: audioDuration } = await validateAudio(blob);
       const mime = (mimeType || '').split(';')[0];
       const ext = mime.includes('opus') ? 'opus' : mime.includes('mp4') ? 'm4a' : mime.includes('webm') ? 'webm' : 'mp3';
 
-      let title = pipedTitle || 'Titre inconnu';
-      let artist = pipedUploader || 'Artiste inconnu';
-      const dm = title.match(/^(.+?)\s*[-–—]\s*(.+)$/);
-      if (dm) { artist = dm[1].trim(); title = dm[2].trim(); }
+      const finalTitle  = title  || pipedTitle    || 'Titre inconnu';
+      const finalArtist = artist || pipedUploader || 'Artiste inconnu';
 
-      // Jaquette via l'URL retournée par Piped (déjà proxifiée, dans connect-src)
+      // Jaquette : tenter de récupérer la miniature Piped proxifiée
       let coverArt = null;
-      const thumb = sanitizeURL(thumbnailUrl || '');
+      const thumb = thumbnailUrl || sanitizeURL(res.thumbnailUrl || '');
       if (thumb) {
         try {
           const tr = await fetchWithTimeout(thumb, {}, 10000);
@@ -1420,7 +1489,8 @@
 
       const meta = {
         id: 'yt-' + videoId + '-' + Date.now(),
-        title, artist, album: '', duration: Math.round(duration || pipedDuration || 0),
+        title: finalTitle, artist: finalArtist, album: '',
+        duration: Math.round(audioDuration || pipedDuration || duration || 0),
         genre: '', color: randColor(), userImported: true,
         fileName: `${videoId}.${ext}`, importedAt: Date.now(),
         coverArt, youtubeId: videoId,
@@ -1428,23 +1498,30 @@
 
       await DB.saveUserTrack(meta, blob);
       userTracks.push(meta);
+
       ytImportFill.style.width = '100%';
       ytImportText.textContent = `"${meta.title}" ajouté à la bibliothèque`;
+      ytPreviewSaveBtn.classList.add('saved');
+      ytPreviewSaveBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg> Sauvegardé';
       ytImportInput.value = '';
+      _ytPreviewData = null;
       showToast(`"${meta.title}" sauvegardé`);
       refreshAllViews();
       setTimeout(() => { ytImportProgress.hidden = true; ytImportFill.style.width = '0%'; }, 3000);
     } catch (err) {
       ytImportFill.style.width = '0%';
       ytImportText.textContent = 'Erreur : ' + (err.message || 'Échec').slice(0, 80);
+      ytPreviewSaveBtn.classList.add('error');
+      ytPreviewSaveBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> Réessayer';
+      ytPreviewSaveBtn.disabled = false;
       showToast('Erreur : ' + (err.message || 'Échec').slice(0, 60));
-    } finally {
-      ytImportBtn.disabled = false;
     }
   }
 
-  ytImportBtn.addEventListener('click', importFromYouTubeUrl);
-  ytImportInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); importFromYouTubeUrl(); } });
+  ytImportBtn.addEventListener('click', analyzeYouTubeUrl);
+  ytImportInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); analyzeYouTubeUrl(); } });
+  ytImportInput.addEventListener('input', () => { if (!ytImportInput.value.trim()) { ytPreviewCard.hidden = true; _ytPreviewData = null; } });
+  ytPreviewSaveBtn.addEventListener('click', saveFromYouTube);
   importDropzone.addEventListener('dragover', (e) => { e.preventDefault(); importDropzone.classList.add('dragover'); });
   importDropzone.addEventListener('dragleave', () => importDropzone.classList.remove('dragover'));
   importDropzone.addEventListener('drop', (e) => { e.preventDefault(); importDropzone.classList.remove('dragover'); if(e.dataTransfer.files.length) importFiles(e.dataTransfer.files); });
