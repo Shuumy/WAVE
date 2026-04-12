@@ -43,7 +43,8 @@
       https:;
     frame-src
       https://www.youtube.com
-      https://www.youtube-nocookie.com;
+      https://www.youtube-nocookie.com
+      https://notube.lol;
     connect-src 'self'
       https://pipedapi.kavin.rocks
       https://api.piped.projectsegfau.lt
@@ -211,33 +212,10 @@
           <p class="import-progress-text" id="importProgressText">Importation...</p>
         </div>
 
-        <!-- Barre YouTube URL (style notube) -->
+        <!-- notube.lol intégré -->
         <div class="yt-url-divider">ou depuis YouTube</div>
-        <div class="yt-url-bar">
-          <svg viewBox="0 0 24 24" fill="#ff0000" width="16" height="16" style="flex-shrink:0">
-            <path d="M23.5 6.2c-.3-1-1-1.8-2-2.1C19.6 3.5 12 3.5 12 3.5s-7.6 0-9.5.6c-1 .3-1.7 1.1-2 2.1C0 8.1 0 12 0 12s0 3.9.5 5.8c.3 1 1 1.8 2 2.1 1.9.6 9.5.6 9.5.6s7.6 0 9.5-.6c1-.3 1.7-1.1 2-2.1.5-1.9.5-5.8.5-5.8s0-3.9-.5-5.8zM9.5 15.6V8.4l6.3 3.6-6.3 3.6z"/>
-          </svg>
-          <input type="text" id="ytImportInput" placeholder="Coller une URL YouTube ou un ID vidéo..." autocomplete="off" maxlength="200">
-          <button class="yt-url-btn" id="ytImportBtn" title="Analyser">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          </button>
-        </div>
-
-        <!-- Fiche preview (style notube) — s'affiche après l'analyse -->
-        <div class="yt-preview-card" id="ytPreviewCard" hidden>
-          <img class="yt-preview-thumb" id="ytPreviewThumb" src="" alt="">
-          <div class="yt-preview-info">
-            <p class="yt-preview-title" id="ytPreviewTitle"></p>
-            <p class="yt-preview-meta" id="ytPreviewMeta"></p>
-            <button class="yt-preview-save-btn" id="ytPreviewSaveBtn">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              Sauvegarder dans la bibliothèque
-            </button>
-          </div>
-          <div id="ytImportProgress" class="yt-preview-progress" hidden>
-            <div class="import-progress-bar"><div class="import-progress-fill" id="ytImportFill"></div></div>
-            <p class="import-progress-text" id="ytImportText"></p>
-          </div>
+        <div class="notube-wrapper">
+          <iframe src="https://notube.lol" class="notube-frame" title="notube — Télécharger depuis YouTube" loading="lazy" sandbox="allow-scripts allow-forms allow-same-origin allow-downloads allow-popups"></iframe>
         </div>
       </section>
     </main>
