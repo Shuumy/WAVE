@@ -1513,6 +1513,7 @@
   });
 
   const PIPED_INSTANCES = [
+    'https://api.piped.private.coffee',
     'https://pipedapi.kavin.rocks',
     'https://api.piped.projectsegfau.lt',
     'https://pipedapi.adminforge.de',
@@ -1526,7 +1527,6 @@
     'https://pipedapi.drgns.space',
     'https://pipedapi.owo.si',
     'https://piped-api.codespace.cz',
-    'https://api.piped.private.coffee',
     'https://pipedapi.darkness.services',
     'https://pipedapi.ducks.party',
   ];
