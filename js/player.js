@@ -14,21 +14,34 @@ const Player = (() => {
   let shuffle = false;
   let repeat = 'none';
   let audioUnlocked = false;
+  let audioCtx = null;
   const listeners = {};
 
   function unlockAudio() {
     if (audioUnlocked) return;
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const buffer = ctx.createBuffer(1, 1, 22050);
-    const source = ctx.createBufferSource();
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const buffer = audioCtx.createBuffer(1, 1, 22050);
+    const source = audioCtx.createBufferSource();
     source.buffer = buffer;
-    source.connect(ctx.destination);
+    source.connect(audioCtx.destination);
     source.start(0);
-    ctx.resume().then(() => { audioUnlocked = true; });
+    audioCtx.resume().then(() => { audioUnlocked = true; });
     audio.play().then(() => audio.pause()).catch(() => {});
     document.removeEventListener('touchstart', unlockAudio, true);
     document.removeEventListener('click', unlockAudio, true);
   }
+
+  async function ensureAudioContextActive() {
+    if (audioCtx && audioCtx.state === 'suspended') {
+      try { await audioCtx.resume(); } catch (_) {}
+    }
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      ensureAudioContextActive();
+    }
+  });
   document.addEventListener('touchstart', unlockAudio, true);
   document.addEventListener('click', unlockAudio, true);
 
@@ -62,6 +75,7 @@ const Player = (() => {
 
   async function play(track) {
     if (track) { const loaded = await loadTrack(track); if (!loaded) return; }
+    await ensureAudioContextActive();
     try { await audio.play(); } catch (err) { console.error('Play failed:', err); }
   }
 
@@ -74,6 +88,7 @@ const Player = (() => {
   audio.src = url;
   audio.load();
 
+  await ensureAudioContextActive();
   try {
     await audio.play();
     return true;
@@ -86,13 +101,14 @@ const Player = (() => {
 
 function pause() { audio.pause(); }
 
-function togglePlay() {
+async function togglePlay() {
   if (isPlaying) {
     pause();
     return;
   }
 
   if (audio.src) {
+    await ensureAudioContextActive();
     audio.play().catch((err) => {
       console.error('Resume failed:', err);
       emit('error', { message: 'Impossible de reprendre la lecture' });
