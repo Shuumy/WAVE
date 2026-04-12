@@ -1333,17 +1333,8 @@
   fileInput.addEventListener('change', () => { if(fileInput.files.length) { importFiles(fileInput.files); fileInput.value=''; } });
   importDropzone.addEventListener('click', (e) => { if(!e.target.closest('.import-btn') && e.target.tagName!=='LABEL') fileInput.click(); });
 
-  // ===== YouTube URL Import (notube-like) =====
-  const ytImportInput    = $('#ytImportInput');
-  const ytImportBtn      = $('#ytImportBtn');
-  const ytImportProgress = $('#ytImportProgress');
-  const ytImportFill     = $('#ytImportFill');
-  const ytImportText     = $('#ytImportText');
+  // ===== notube.lol intégré en iframe — pas de JS spécifique nécessaire =====
 
-  /**
-   * Extrait l'ID vidéo YouTube depuis une URL ou un ID direct.
-   * Formats supportés : youtube.com/watch?v=, youtu.be/, /shorts/, ID brut 11 chars.
-   */
   function extractYouTubeVideoId(input) {
     input = (input || '').trim();
     if (!input) return null;
@@ -1360,91 +1351,7 @@
     return m ? m[1] : null;
   }
 
-  async function importFromYouTubeUrl() {
-    const videoId = extractYouTubeVideoId(ytImportInput.value);
-    if (!videoId) { showToast('URL YouTube invalide'); return; }
-    if (userTracks.some(t => t.youtubeId === videoId)) { showToast('Déjà dans la bibliothèque'); return; }
 
-    ytImportBtn.disabled = true;
-    ytImportProgress.hidden = false;
-    ytImportFill.style.width = '10%';
-    ytImportText.textContent = 'Connexion au serveur...';
-
-    try {
-      let res;
-      try {
-        ytImportFill.style.width = '20%';
-        ytImportText.textContent = 'Téléchargement via Piped...';
-        res = await downloadFromPiped(videoId, (c, t) => {
-          ytImportFill.style.width = `${20 + Math.round((c / t) * 45)}%`;
-          ytImportText.textContent = `Piped ${c}/${t}...`;
-        });
-      } catch {
-        ytImportFill.style.width = '50%';
-        ytImportText.textContent = 'Essai Invidious...';
-        res = await downloadFromInvidious(videoId, (c, t) => {
-          ytImportFill.style.width = `${50 + Math.round((c / t) * 30)}%`;
-          ytImportText.textContent = `Invidious ${c}/${t}...`;
-        });
-      }
-
-      ytImportFill.style.width = '82%';
-      ytImportText.textContent = 'Validation audio...';
-
-      const { blob, mimeType, pipedTitle, pipedUploader, pipedDuration, thumbnailUrl } = res;
-      const { duration } = await validateAudio(blob);
-      const mime = (mimeType || '').split(';')[0];
-      const ext = mime.includes('opus') ? 'opus' : mime.includes('mp4') ? 'm4a' : mime.includes('webm') ? 'webm' : 'mp3';
-
-      let title = pipedTitle || 'Titre inconnu';
-      let artist = pipedUploader || 'Artiste inconnu';
-      const dm = title.match(/^(.+?)\s*[-–—]\s*(.+)$/);
-      if (dm) { artist = dm[1].trim(); title = dm[2].trim(); }
-
-      // Jaquette via l'URL retournée par Piped (déjà proxifiée, dans connect-src)
-      let coverArt = null;
-      const thumb = sanitizeURL(thumbnailUrl || '');
-      if (thumb) {
-        try {
-          const tr = await fetchWithTimeout(thumb, {}, 10000);
-          if (tr.ok) {
-            const ct = tr.headers.get('content-type') || '';
-            if (ct.startsWith('image/')) {
-              const tb = await tr.blob();
-              coverArt = await new Promise(r => { const rd = new FileReader(); rd.onload = () => r(rd.result); rd.onerror = () => r(null); rd.readAsDataURL(tb); });
-              if (coverArt && !coverArt.startsWith('data:image/')) coverArt = null;
-            }
-          }
-        } catch {}
-      }
-
-      const meta = {
-        id: 'yt-' + videoId + '-' + Date.now(),
-        title, artist, album: '', duration: Math.round(duration || pipedDuration || 0),
-        genre: '', color: randColor(), userImported: true,
-        fileName: `${videoId}.${ext}`, importedAt: Date.now(),
-        coverArt, youtubeId: videoId,
-      };
-
-      await DB.saveUserTrack(meta, blob);
-      userTracks.push(meta);
-      ytImportFill.style.width = '100%';
-      ytImportText.textContent = `"${meta.title}" ajouté à la bibliothèque`;
-      ytImportInput.value = '';
-      showToast(`"${meta.title}" sauvegardé`);
-      refreshAllViews();
-      setTimeout(() => { ytImportProgress.hidden = true; ytImportFill.style.width = '0%'; }, 3000);
-    } catch (err) {
-      ytImportFill.style.width = '0%';
-      ytImportText.textContent = 'Erreur : ' + (err.message || 'Échec').slice(0, 80);
-      showToast('Erreur : ' + (err.message || 'Échec').slice(0, 60));
-    } finally {
-      ytImportBtn.disabled = false;
-    }
-  }
-
-  ytImportBtn.addEventListener('click', importFromYouTubeUrl);
-  ytImportInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); importFromYouTubeUrl(); } });
   importDropzone.addEventListener('dragover', (e) => { e.preventDefault(); importDropzone.classList.add('dragover'); });
   importDropzone.addEventListener('dragleave', () => importDropzone.classList.remove('dragover'));
   importDropzone.addEventListener('drop', (e) => { e.preventDefault(); importDropzone.classList.remove('dragover'); if(e.dataTransfer.files.length) importFiles(e.dataTransfer.files); });
