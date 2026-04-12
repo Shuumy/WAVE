@@ -147,6 +147,20 @@
   function getAllTracks()          { return [...userTracks]; }
   function findTrack(id)          { return userTracks.find(t => t.id === id); }
 
+  // ===== Shuffle Play =====
+  function shufflePlay(tracks) {
+    if (!tracks || !tracks.length) { showToast('Aucun morceau à lire'); return; }
+    if (!shuffleActive) {
+      shuffleActive = Player.toggleShuffle();
+      btnShuffle.classList.toggle('active', shuffleActive);
+      npBtnShuffle.classList.toggle('active', shuffleActive);
+    }
+    const idx = Math.floor(Math.random() * tracks.length);
+    Player.setQueue(tracks, idx);
+    Player.play(tracks[idx]);
+    showToast('Lecture aléatoire');
+  }
+
   // ===== Navigation =====
   navBtns.forEach(btn => {
     btn.addEventListener('click', () => {
@@ -175,6 +189,14 @@
       setTimeout(() => { toast.hidden = true; }, 300);
     }, 2500);
   }
+
+  // ===== Settings =====
+  const settingsBtn     = $('#settingsBtn');
+  const settingsOverlay = $('#settingsOverlay');
+  const closeSettingsBtn= $('#closeSettingsBtn');
+  settingsBtn.addEventListener('click', () => { settingsOverlay.hidden = false; });
+  closeSettingsBtn.addEventListener('click', () => { settingsOverlay.hidden = true; });
+  settingsOverlay.addEventListener('click', (e) => { if (e.target === settingsOverlay) settingsOverlay.hidden = true; });
 
   // ===== Profile Picture =====
   async function loadProfilePicture() {
@@ -657,6 +679,16 @@
       if (!recentTracks.length) rec.innerHTML = '<p class="empty-state">Aucun morceau joué récemment.</p>';
       else renderTrackList(rec, recentTracks);
     }
+    // Bouton aléatoire dans le titre de section (ajouté une seule fois)
+    const sTitle = document.querySelector('#recentSection .section-title');
+    if (sTitle && !sTitle.querySelector('.shuffle-section-btn')) {
+      const sb = document.createElement('button');
+      sb.className = 'shuffle-section-btn';
+      sb.title = 'Lire en aléatoire';
+      sb.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg> Aléatoire';
+      sb.addEventListener('click', () => shufflePlay(getAllTracks()));
+      sTitle.appendChild(sb);
+    }
   }
 
   // ===== Library View =====
@@ -686,6 +718,14 @@
       content.innerHTML = '<div class="track-list" id="libraryTracks"></div>';
       renderSortRow(content);
       const tracks = searchFilter(applySort(getAllTracks()), librarySearchQuery);
+      if (tracks.length) {
+        const sb = document.createElement('button');
+        sb.className = 'shuffle-section-btn';
+        sb.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg> Lire en aléatoire';
+        sb.style.marginBottom = '12px';
+        sb.addEventListener('click', () => shufflePlay(tracks));
+        content.insertBefore(sb, $('#libraryTracks'));
+      }
       const c = $('#libraryTracks');
       if (!tracks.length) c.innerHTML = `<p class="empty-state">${librarySearchQuery ? 'Aucun résultat.' : 'Aucun morceau importé.'}</p>`;
       else renderTrackList(c, tracks, { showDelete: true });
@@ -694,6 +734,14 @@
       renderSortRow(content);
       const favs = await DB.getFavorites();
       const tracks = searchFilter(applySort(favs.map(f => findTrack(f.id)).filter(Boolean)), librarySearchQuery);
+      if (tracks.length) {
+        const sb = document.createElement('button');
+        sb.className = 'shuffle-section-btn';
+        sb.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg> Lire en aléatoire';
+        sb.style.marginBottom = '12px';
+        sb.addEventListener('click', () => shufflePlay(tracks));
+        content.insertBefore(sb, $('#libraryTracks'));
+      }
       const c = $('#libraryTracks');
       if (!tracks.length) c.innerHTML = `<p class="empty-state">${librarySearchQuery ? 'Aucun résultat.' : 'Aucun favori.'}</p>`;
       else renderTrackList(c, tracks, { showDelete: true });
@@ -783,6 +831,9 @@
           </h3>
           <p>${tracks.length} morceau${tracks.length!==1?'x':''} · ${formatTotalDuration(totalSec)}</p>
           <div class="playlist-detail-actions">
+            <button class="playlist-action-btn" id="playlistShuffleBtn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg> Aléatoire
+            </button>
             <button class="playlist-action-btn" id="playlistAddTracksBtn">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Ajouter des morceaux
             </button>
@@ -812,6 +863,7 @@
       showToast('Playlist renommée'); renderPlaylistDetail(plId);
     });
     $('#playlistCoverBtn').addEventListener('click', () => { playlistCoverInput.dataset.playlistId = plId; playlistCoverInput.click(); });
+    $('#playlistShuffleBtn').addEventListener('click', () => shufflePlay(tracks));
     $('#playlistAddTracksBtn').addEventListener('click', () => openPlaylistSearchModal(plId));
   }
 
@@ -1280,6 +1332,119 @@
   }
   fileInput.addEventListener('change', () => { if(fileInput.files.length) { importFiles(fileInput.files); fileInput.value=''; } });
   importDropzone.addEventListener('click', (e) => { if(!e.target.closest('.import-btn') && e.target.tagName!=='LABEL') fileInput.click(); });
+
+  // ===== YouTube URL Import (notube-like) =====
+  const ytImportInput    = $('#ytImportInput');
+  const ytImportBtn      = $('#ytImportBtn');
+  const ytImportProgress = $('#ytImportProgress');
+  const ytImportFill     = $('#ytImportFill');
+  const ytImportText     = $('#ytImportText');
+
+  /**
+   * Extrait l'ID vidéo YouTube depuis une URL ou un ID direct.
+   * Formats supportés : youtube.com/watch?v=, youtu.be/, /shorts/, ID brut 11 chars.
+   */
+  function extractYouTubeVideoId(input) {
+    input = (input || '').trim();
+    if (!input) return null;
+    if (/^[a-zA-Z0-9_-]{11}$/.test(input)) return input;
+    try {
+      const u = new URL(input);
+      if (u.hostname.includes('youtube.com')) {
+        if (u.pathname.startsWith('/shorts/')) return u.pathname.split('/')[2]?.slice(0, 11) || null;
+        return u.searchParams.get('v');
+      }
+      if (u.hostname === 'youtu.be') return u.pathname.slice(1).split('?')[0].slice(0, 11) || null;
+    } catch {}
+    const m = input.match(/(?:v=|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})/);
+    return m ? m[1] : null;
+  }
+
+  async function importFromYouTubeUrl() {
+    const videoId = extractYouTubeVideoId(ytImportInput.value);
+    if (!videoId) { showToast('URL YouTube invalide'); return; }
+    if (userTracks.some(t => t.youtubeId === videoId)) { showToast('Déjà dans la bibliothèque'); return; }
+
+    ytImportBtn.disabled = true;
+    ytImportProgress.hidden = false;
+    ytImportFill.style.width = '10%';
+    ytImportText.textContent = 'Connexion au serveur...';
+
+    try {
+      let res;
+      try {
+        ytImportFill.style.width = '20%';
+        ytImportText.textContent = 'Téléchargement via Piped...';
+        res = await downloadFromPiped(videoId, (c, t) => {
+          ytImportFill.style.width = `${20 + Math.round((c / t) * 45)}%`;
+          ytImportText.textContent = `Piped ${c}/${t}...`;
+        });
+      } catch {
+        ytImportFill.style.width = '50%';
+        ytImportText.textContent = 'Essai Invidious...';
+        res = await downloadFromInvidious(videoId, (c, t) => {
+          ytImportFill.style.width = `${50 + Math.round((c / t) * 30)}%`;
+          ytImportText.textContent = `Invidious ${c}/${t}...`;
+        });
+      }
+
+      ytImportFill.style.width = '82%';
+      ytImportText.textContent = 'Validation audio...';
+
+      const { blob, mimeType, pipedTitle, pipedUploader, pipedDuration, thumbnailUrl } = res;
+      const { duration } = await validateAudio(blob);
+      const mime = (mimeType || '').split(';')[0];
+      const ext = mime.includes('opus') ? 'opus' : mime.includes('mp4') ? 'm4a' : mime.includes('webm') ? 'webm' : 'mp3';
+
+      let title = pipedTitle || 'Titre inconnu';
+      let artist = pipedUploader || 'Artiste inconnu';
+      const dm = title.match(/^(.+?)\s*[-–—]\s*(.+)$/);
+      if (dm) { artist = dm[1].trim(); title = dm[2].trim(); }
+
+      // Jaquette via l'URL retournée par Piped (déjà proxifiée, dans connect-src)
+      let coverArt = null;
+      const thumb = sanitizeURL(thumbnailUrl || '');
+      if (thumb) {
+        try {
+          const tr = await fetchWithTimeout(thumb, {}, 10000);
+          if (tr.ok) {
+            const ct = tr.headers.get('content-type') || '';
+            if (ct.startsWith('image/')) {
+              const tb = await tr.blob();
+              coverArt = await new Promise(r => { const rd = new FileReader(); rd.onload = () => r(rd.result); rd.onerror = () => r(null); rd.readAsDataURL(tb); });
+              if (coverArt && !coverArt.startsWith('data:image/')) coverArt = null;
+            }
+          }
+        } catch {}
+      }
+
+      const meta = {
+        id: 'yt-' + videoId + '-' + Date.now(),
+        title, artist, album: '', duration: Math.round(duration || pipedDuration || 0),
+        genre: '', color: randColor(), userImported: true,
+        fileName: `${videoId}.${ext}`, importedAt: Date.now(),
+        coverArt, youtubeId: videoId,
+      };
+
+      await DB.saveUserTrack(meta, blob);
+      userTracks.push(meta);
+      ytImportFill.style.width = '100%';
+      ytImportText.textContent = `"${meta.title}" ajouté à la bibliothèque`;
+      ytImportInput.value = '';
+      showToast(`"${meta.title}" sauvegardé`);
+      refreshAllViews();
+      setTimeout(() => { ytImportProgress.hidden = true; ytImportFill.style.width = '0%'; }, 3000);
+    } catch (err) {
+      ytImportFill.style.width = '0%';
+      ytImportText.textContent = 'Erreur : ' + (err.message || 'Échec').slice(0, 80);
+      showToast('Erreur : ' + (err.message || 'Échec').slice(0, 60));
+    } finally {
+      ytImportBtn.disabled = false;
+    }
+  }
+
+  ytImportBtn.addEventListener('click', importFromYouTubeUrl);
+  ytImportInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); importFromYouTubeUrl(); } });
   importDropzone.addEventListener('dragover', (e) => { e.preventDefault(); importDropzone.classList.add('dragover'); });
   importDropzone.addEventListener('dragleave', () => importDropzone.classList.remove('dragover'));
   importDropzone.addEventListener('drop', (e) => { e.preventDefault(); importDropzone.classList.remove('dragover'); if(e.dataTransfer.files.length) importFiles(e.dataTransfer.files); });
@@ -1738,7 +1903,7 @@
         const contentType = ar.headers.get('content-type') || '';
         if (!contentType.startsWith('audio/') && !contentType.startsWith('video/') && !contentType.includes('octet-stream')) continue;
         const blob = await ar.blob(); if(!blob||blob.size<10000) continue;
-        return { blob, mimeType:stream.mimeType, pipedTitle:data.title, pipedUploader:data.uploader, pipedDuration:data.duration };
+        return { blob, mimeType:stream.mimeType, pipedTitle:data.title, pipedUploader:data.uploader, pipedDuration:data.duration, thumbnailUrl:data.thumbnailUrl||'' };
       } catch(e) {
         if (e.name !== 'AbortError') console.error('Piped download error:', inst);
       }
@@ -1795,9 +1960,17 @@
   }
 
   // ===== Portrait Lock =====
+  // Tentative immédiate (fonctionne en PWA installée sur Android)
   if (screen.orientation && screen.orientation.lock) {
-    screen.orientation.lock('portrait').catch(() => { /* silencieux si non supporté */ });
+    screen.orientation.lock('portrait').catch(() => {});
   }
+  // Retenter au premier geste utilisateur (requis par certains navigateurs)
+  document.addEventListener('touchstart', function retryLock() {
+    if (screen.orientation && screen.orientation.lock) {
+      screen.orientation.lock('portrait').catch(() => {});
+    }
+    document.removeEventListener('touchstart', retryLock);
+  }, { once: true, passive: true });
 
   // ===== Init =====
   syncYTAPIState();
