@@ -1587,7 +1587,7 @@
   async function downloadYouTubeAsBlobUrl(videoId) {
     for (const inst of PIPED_INSTANCES) {
       try {
-        const r = await fetchWithTimeout(`${inst}/streams/${videoId}`, {}, 8000);
+        const r = await fetchWithTimeout(`${inst}/streams/${videoId}`, { cache:'no-cache' }, 8000);
         if (!r.ok) continue;
         const data = await r.json();
         if (!data.audioStreams?.length) continue;
@@ -1598,20 +1598,17 @@
           try {
             const rawUrl = sanitizeURL(stream.url);
             if (!rawUrl) continue;
+            // URLs CDN externes : pas de CORS → skip ; on ne garde que les URLs proxifiées par l'instance
             const isExternal = instHost && !rawUrl.includes(instHost);
-            const urlsToTry = isExternal
-              ? [`${inst}/proxy?url=${encodeURIComponent(rawUrl)}`, rawUrl]
-              : [rawUrl, `${inst}/proxy?url=${encodeURIComponent(rawUrl)}`];
-            for (const audioUrl of urlsToTry) {
-              try {
-                const ar = await fetchWithTimeout(audioUrl, {}, 30000);
-                if (!ar.ok) continue;
-                const contentType = ar.headers.get('content-type') || '';
-                if (!contentType.startsWith('audio/') && !contentType.startsWith('video/') && !contentType.includes('octet-stream')) continue;
-                const blob = await ar.blob();
-                if (blob.size > 5000) return URL.createObjectURL(blob);
-              } catch {}
-            }
+            if (isExternal) continue;
+            try {
+              const ar = await fetchWithTimeout(rawUrl, {}, 120000);
+              if (!ar.ok) continue;
+              const contentType = ar.headers.get('content-type') || '';
+              if (contentType && !contentType.startsWith('audio/') && !contentType.startsWith('video/') && !contentType.includes('octet-stream')) continue;
+              const blob = await ar.blob();
+              if (blob.size > 5000) return URL.createObjectURL(blob);
+            } catch {}
           } catch {}
         }
       } catch(e) {
@@ -1628,7 +1625,7 @@
         for (const fmt of fmts.slice(0,2)) {
           try {
             const url = `${inst}/latest_version?id=${videoId}&itag=${encodeURIComponent(fmt.itag)}&local=true`;
-            const ar = await fetchWithTimeout(url, {}, 30000);
+            const ar = await fetchWithTimeout(url, {}, 120000);
             if (!ar.ok) continue;
             const blob = await ar.blob();
             if (blob.size > 5000) return URL.createObjectURL(blob);
@@ -1895,7 +1892,8 @@
       const inst = PIPED_INSTANCES[i];
       try {
         if(onProgress) onProgress(i+1, PIPED_INSTANCES.length);
-        const r = await fetchWithTimeout(`${inst}/streams/${videoId}`, {}, 12000);
+        // cache:'no-cache' évite les URLs de streams expirées en cache navigateur
+        const r = await fetchWithTimeout(`${inst}/streams/${videoId}`, { cache:'no-cache' }, 12000);
         if(!r.ok) continue;
         const data = await r.json();
         if(!data.audioStreams?.length) continue;
@@ -1906,29 +1904,28 @@
         let instHost = '';
         try { instHost = new URL(inst).hostname; } catch {}
 
-        // Essayer les 3 meilleures qualités (comme downloadYouTubeAsBlobUrl)
+        // Essayer les 3 meilleures qualités
         for (const stream of sorted.slice(0, 3)) {
           const rawUrl = sanitizeURL(stream.url);
           if (!rawUrl) continue;
 
-          // Si l'URL est externe (CDN YouTube, non proxifiée) → proxy en premier
-          // Si déjà proxifiée par l'instance → directe en premier
+          // Les URLs externes (CDN YouTube) ne fonctionnent pas via fetch() JS car
+          // YouTube ne retourne pas Access-Control-Allow-Origin. On ne garde que
+          // les URLs déjà proxifiées par l'instance Piped (qui elles ont les bons headers CORS).
           const isExternal = instHost && !rawUrl.includes(instHost);
-          const urlsToTry = isExternal
-            ? [`${inst}/proxy?url=${encodeURIComponent(rawUrl)}`, rawUrl]
-            : [rawUrl, `${inst}/proxy?url=${encodeURIComponent(rawUrl)}`];
+          if (isExternal) continue;
 
-          for (const audioUrl of urlsToTry) {
-            try {
-              const ar = await fetchWithTimeout(audioUrl, {}, 35000);
-              if (!ar.ok) continue;
-              const contentType = ar.headers.get('content-type') || '';
-              if (!contentType.startsWith('audio/') && !contentType.startsWith('video/') && !contentType.includes('octet-stream')) continue;
-              const blob = await ar.blob();
-              if (!blob || blob.size < 10000) continue;
-              return { blob, mimeType:stream.mimeType, pipedTitle:data.title, pipedUploader:data.uploader, pipedDuration:data.duration, thumbnailUrl:data.thumbnailUrl||'' };
-            } catch { /* essayer l'URL suivante */ }
-          }
+          try {
+            // Timeout long (120 s) : un fichier audio de 4-8 Mo sur mobile peut dépasser 35 s
+            const ar = await fetchWithTimeout(rawUrl, {}, 120000);
+            if (!ar.ok) continue;
+            const contentType = ar.headers.get('content-type') || '';
+            // Accepter aussi content-type vide (certains proxies ne le définissent pas)
+            if (contentType && !contentType.startsWith('audio/') && !contentType.startsWith('video/') && !contentType.includes('octet-stream')) continue;
+            const blob = await ar.blob();
+            if (!blob || blob.size < 10000) continue;
+            return { blob, mimeType:stream.mimeType, pipedTitle:data.title, pipedUploader:data.uploader, pipedDuration:data.duration, thumbnailUrl:data.thumbnailUrl||'' };
+          } catch { /* essayer le stream suivant */ }
         }
       } catch(e) {
         if (e.name !== 'AbortError') console.error('Piped download error:', inst);
@@ -1949,7 +1946,7 @@
         const fmts = (data.adaptiveFormats||[]).filter(f=>f.type?.startsWith('audio/')&&f.itag).sort((a,b)=>(parseInt(b.bitrate)||0)-(parseInt(a.bitrate)||0));
         if(!fmts.length) continue;
         const url = `${inst}/latest_version?id=${encodeURIComponent(videoId)}&itag=${encodeURIComponent(fmts[0].itag)}&local=true`;
-        const ar = await fetchWithTimeout(url, {}, 35000); if(!ar.ok) continue;
+        const ar = await fetchWithTimeout(url, {}, 120000); if(!ar.ok) continue;
         const blob = await ar.blob(); if(!blob||blob.size<10000) continue;
         return { blob, mimeType:fmts[0].type.split(';')[0], pipedTitle:data.title, pipedUploader:data.author, pipedDuration:data.lengthSeconds };
       } catch(e) {
