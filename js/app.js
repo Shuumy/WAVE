@@ -1986,16 +1986,38 @@
   }
 
   // ===== Portrait Lock =====
-  // Tentative immédiate (fonctionne en PWA installée sur Android)
+  // iOS ne supporte pas screen.orientation.lock() — on utilise JS pur.
+  // On cible uniquement les appareils mobiles (plus petite dimension ≤ 600px).
+  const _plOverlay = document.getElementById('portraitLockOverlay');
+  const _appEl     = document.getElementById('app');
+
+  function _isMobile() {
+    return Math.min(screen.width, screen.height) <= 600;
+  }
+  function _applyPortraitLock() {
+    if (!_isMobile()) return;
+    const landscape = window.innerWidth > window.innerHeight;
+    _plOverlay.style.display         = landscape ? 'flex'   : '';
+    if (_appEl) _appEl.style.visibility = landscape ? 'hidden' : '';
+    // Bloquer le scroll quand l'overlay est actif
+    document.body.style.overflow = landscape ? 'hidden' : '';
+  }
+
+  window.addEventListener('resize', _applyPortraitLock, { passive: true });
+  // orientationchange est parfois décalé sur iOS → petit délai
+  window.addEventListener('orientationchange', () => {
+    setTimeout(_applyPortraitLock, 80);
+  }, { passive: true });
+  _applyPortraitLock(); // vérification immédiate au chargement
+
+  // Verrouillage natif (Android Chrome PWA installée, ignoré silencieusement sur iOS)
   if (screen.orientation && screen.orientation.lock) {
     screen.orientation.lock('portrait').catch(() => {});
   }
-  // Retenter au premier geste utilisateur (requis par certains navigateurs)
   document.addEventListener('touchstart', function retryLock() {
     if (screen.orientation && screen.orientation.lock) {
       screen.orientation.lock('portrait').catch(() => {});
     }
-    document.removeEventListener('touchstart', retryLock);
   }, { once: true, passive: true });
 
   // ===== Init =====
