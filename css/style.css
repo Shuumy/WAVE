@@ -790,6 +790,19 @@ input  { border:none; background:none; color:inherit; font:inherit; outline:none
 .yt-preview-save-btn:disabled { opacity:.5; cursor:not-allowed; }
 .yt-preview-save-btn.saved { background:#22c55e; color:#fff; }
 .yt-preview-save-btn.error { background:#ef4444; color:#fff; }
+.yt-preview-actions { display:flex; flex-direction:column; gap:8px; }
+.yt-preview-dl-btn {
+  display:flex; align-items:center; justify-content:center; gap:7px;
+  width:100%; padding:11px 16px; border-radius:var(--radius-sm);
+  background:transparent; color:var(--text-primary);
+  border:1px solid var(--border);
+  font-size:0.78rem; font-weight:600; font-family:'Figtree',sans-serif;
+  letter-spacing:0.04em; cursor:pointer;
+  transition:all var(--transition);
+}
+.yt-preview-dl-btn:hover { border-color:var(--text-primary); }
+.yt-preview-dl-btn:disabled { opacity:.5; cursor:not-allowed; }
+.yt-preview-dl-btn.done { border-color:#22c55e; color:#22c55e; }
 .yt-preview-progress { padding:0 16px 16px; }
 
 /* ===== Shuffle Section Button ===== */

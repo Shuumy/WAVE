@@ -1333,7 +1333,25 @@
   fileInput.addEventListener('change', () => { if(fileInput.files.length) { importFiles(fileInput.files); fileInput.value=''; } });
   importDropzone.addEventListener('click', (e) => { if(!e.target.closest('.import-btn') && e.target.tagName!=='LABEL') fileInput.click(); });
 
-  // ===== notube.lol intégré en iframe — pas de JS spécifique nécessaire =====
+  // ===== Import YouTube (cobalt → Piped → Invidious) =====
+  const ytImportInput    = $('#ytImportInput');
+  const ytImportBtn      = $('#ytImportBtn');
+  const ytPreviewCard    = $('#ytPreviewCard');
+  const ytPreviewThumb   = $('#ytPreviewThumb');
+  const ytPreviewTitleEl = $('#ytPreviewTitle');
+  const ytPreviewMetaEl  = $('#ytPreviewMeta');
+  const ytPreviewSaveBtn = $('#ytPreviewSaveBtn');
+  const ytPreviewDlBtn   = $('#ytPreviewDlBtn');
+  const ytImportProgress = $('#ytImportProgress');
+  const ytImportFill     = $('#ytImportFill');
+  const ytImportText     = $('#ytImportText');
+
+  let _ytPreviewData = null;
+
+  function _fmtDur(s) {
+    if (!s || s <= 0) return '';
+    return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+  }
 
   function extractYouTubeVideoId(input) {
     input = (input || '').trim();
@@ -1351,6 +1369,174 @@
     return m ? m[1] : null;
   }
 
+
+  // Étape 1 : analyser l'URL → afficher la preview
+  async function analyzeYouTubeUrl() {
+    const videoId = extractYouTubeVideoId(ytImportInput.value);
+    if (!videoId) { showToast('URL YouTube invalide'); return; }
+    _ytPreviewData = null;
+    ytImportBtn.disabled = true;
+    ytPreviewCard.hidden = false;
+    ytPreviewThumb.src = `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/hqdefault.jpg`;
+    ytPreviewTitleEl.textContent = 'Analyse...';
+    ytPreviewMetaEl.textContent = '';
+    ytPreviewSaveBtn.hidden = true;
+    ytPreviewDlBtn.hidden = true;
+    ytPreviewSaveBtn.className = 'yt-preview-save-btn';
+    ytPreviewDlBtn.className = 'yt-preview-dl-btn';
+    ytImportProgress.hidden = true;
+    let rawTitle = '', uploader = '', duration = 0, thumbnailUrl = '';
+    for (const inst of PIPED_INSTANCES) {
+      try {
+        const r = await fetchWithTimeout(`${inst}/streams/${videoId}`, { cache:'no-cache' }, 10000);
+        if (!r.ok) continue;
+        const d = await r.json();
+        if (d.error) continue;
+        rawTitle = d.title || ''; uploader = d.uploader || '';
+        duration = d.duration || 0; thumbnailUrl = sanitizeURL(d.thumbnailUrl || '') || '';
+        break;
+      } catch {}
+    }
+    ytImportBtn.disabled = false;
+    let displayTitle = rawTitle || 'Titre inconnu', displayArtist = uploader || '';
+    const dm = rawTitle.match(/^(.+?)\s*[-–—]\s*(.+)$/);
+    if (dm) { displayArtist = dm[1].trim(); displayTitle = dm[2].trim(); }
+    ytPreviewTitleEl.textContent = displayTitle;
+    ytPreviewMetaEl.textContent = displayArtist + (_fmtDur(duration) ? ' · ' + _fmtDur(duration) : '');
+    const alreadySaved = userTracks.some(t => t.youtubeId === videoId);
+    ytPreviewSaveBtn.innerHTML = alreadySaved
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg> Déjà dans la bibliothèque'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg> Sauvegarder dans la bibliothèque';
+    ytPreviewSaveBtn.disabled = alreadySaved;
+    if (alreadySaved) ytPreviewSaveBtn.classList.add('saved');
+    ytPreviewDlBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Télécharger sur l\'appareil';
+    ytPreviewDlBtn.disabled = false;
+    ytPreviewSaveBtn.hidden = false;
+    ytPreviewDlBtn.hidden = false;
+    _ytPreviewData = { videoId, title: displayTitle, artist: displayArtist, duration, thumbnailUrl };
+  }
+
+  // Étape 2a : sauvegarder dans la bibliothèque (cobalt → Piped → Invidious)
+  async function saveFromYouTube() {
+    if (!_ytPreviewData) return;
+    const { videoId, title, artist, duration, thumbnailUrl } = _ytPreviewData;
+    ytPreviewSaveBtn.disabled = true; ytPreviewDlBtn.disabled = true;
+    ytImportProgress.hidden = false;
+    ytImportFill.style.width = '5%'; ytImportText.textContent = 'Connexion...';
+    try {
+      let blob, mimeType, pipedTitle, pipedUploader, pipedDuration;
+      // 1. cobalt.tools (yt-dlp)
+      try {
+        ytImportText.textContent = 'cobalt.tools (yt-dlp)...';
+        ytImportFill.style.width = '15%';
+        ({ blob, mimeType } = await downloadFromCobalt(videoId));
+        pipedTitle = title; pipedUploader = artist; pipedDuration = duration;
+      } catch {
+        // 2. Piped
+        try {
+          ytImportFill.style.width = '25%'; ytImportText.textContent = 'Piped...';
+          const res = await downloadFromPiped(videoId, (c,t) => {
+            ytImportFill.style.width = `${25 + Math.round(c/t*35)}%`;
+            ytImportText.textContent = `Piped ${c}/${t}...`;
+          });
+          ({ blob, mimeType } = res);
+          pipedTitle = res.pipedTitle; pipedUploader = res.pipedUploader; pipedDuration = res.pipedDuration;
+        } catch {
+          // 3. Invidious
+          ytImportFill.style.width = '65%'; ytImportText.textContent = 'Invidious...';
+          const res = await downloadFromInvidious(videoId, (c,t) => {
+            ytImportFill.style.width = `${65 + Math.round(c/t*20)}%`;
+            ytImportText.textContent = `Invidious ${c}/${t}...`;
+          });
+          ({ blob, mimeType } = res);
+          pipedTitle = res.pipedTitle; pipedUploader = res.pipedUploader; pipedDuration = res.pipedDuration;
+        }
+      }
+      ytImportFill.style.width = '88%'; ytImportText.textContent = 'Validation...';
+      const { duration: audioDuration } = await validateAudio(blob);
+      const mime = (mimeType || '').split(';')[0];
+      const ext = mime.includes('opus') ? 'opus' : mime.includes('mp4') ? 'm4a' : mime.includes('webm') ? 'webm' : 'mp3';
+      const finalTitle = title || pipedTitle || 'Titre inconnu';
+      const finalArtist = artist || pipedUploader || 'Artiste inconnu';
+      let coverArt = null;
+      const thumb = thumbnailUrl || sanitizeURL((typeof res !== 'undefined' && res?.thumbnailUrl) || '');
+      if (thumb) {
+        try {
+          const tr = await fetchWithTimeout(thumb, {}, 10000);
+          if (tr.ok && (tr.headers.get('content-type')||'').startsWith('image/')) {
+            const tb = await tr.blob();
+            coverArt = await new Promise(r => { const rd = new FileReader(); rd.onload=()=>r(rd.result); rd.onerror=()=>r(null); rd.readAsDataURL(tb); });
+            if (coverArt && !coverArt.startsWith('data:image/')) coverArt = null;
+          }
+        } catch {}
+      }
+      const meta = { id:'yt-'+videoId+'-'+Date.now(), title:finalTitle, artist:finalArtist, album:'', duration:Math.round(audioDuration||pipedDuration||duration||0), genre:'', color:randColor(), userImported:true, fileName:`${videoId}.${ext}`, importedAt:Date.now(), coverArt, youtubeId:videoId };
+      await DB.saveUserTrack(meta, blob); userTracks.push(meta);
+      ytImportFill.style.width = '100%'; ytImportText.textContent = `"${meta.title}" ajouté à la bibliothèque`;
+      ytPreviewSaveBtn.classList.add('saved');
+      ytPreviewSaveBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg> Sauvegardé';
+      ytImportInput.value = ''; _ytPreviewData = null;
+      showToast(`"${meta.title}" sauvegardé`); refreshAllViews();
+      setTimeout(() => { ytImportProgress.hidden = true; ytImportFill.style.width = '0%'; }, 3000);
+    } catch (err) {
+      ytImportFill.style.width = '0%'; ytImportText.textContent = 'Erreur : ' + (err.message||'Échec').slice(0,80);
+      ytPreviewSaveBtn.disabled = false;
+      showToast('Erreur : ' + (err.message||'Échec').slice(0,60));
+    } finally {
+      ytPreviewDlBtn.disabled = false;
+    }
+  }
+
+  // Étape 2b : télécharger directement sur l'appareil (cobalt → Piped → Invidious)
+  async function downloadToDevice() {
+    if (!_ytPreviewData) return;
+    const { videoId, title } = _ytPreviewData;
+    ytPreviewDlBtn.disabled = true; ytPreviewSaveBtn.disabled = true;
+    ytImportProgress.hidden = false;
+    ytImportFill.style.width = '10%'; ytImportText.textContent = 'Téléchargement...';
+    try {
+      let blob, mimeType;
+      try {
+        ytImportText.textContent = 'cobalt.tools...'; ytImportFill.style.width = '20%';
+        ({ blob, mimeType } = await downloadFromCobalt(videoId));
+      } catch {
+        try {
+          ytImportText.textContent = 'Piped...'; ytImportFill.style.width = '40%';
+          const res = await downloadFromPiped(videoId);
+          blob = res.blob; mimeType = res.mimeType;
+        } catch {
+          ytImportText.textContent = 'Invidious...'; ytImportFill.style.width = '65%';
+          const res = await downloadFromInvidious(videoId);
+          blob = res.blob; mimeType = res.mimeType;
+        }
+      }
+      ytImportFill.style.width = '95%'; ytImportText.textContent = 'Préparation du fichier...';
+      const mime = (mimeType||'').split(';')[0];
+      const ext = mime.includes('opus') ? 'opus' : mime.includes('mp4') ? 'm4a' : mime.includes('webm') ? 'webm' : 'mp3';
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl; a.download = `${title}.${ext}`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+      ytImportFill.style.width = '100%'; ytImportText.textContent = 'Téléchargement lancé !';
+      ytPreviewDlBtn.classList.add('done');
+      ytPreviewDlBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg> Téléchargé';
+      showToast('Téléchargement lancé');
+      setTimeout(() => { ytImportProgress.hidden = true; ytImportFill.style.width = '0%'; }, 3000);
+    } catch (err) {
+      ytImportFill.style.width = '0%'; ytImportText.textContent = 'Erreur : ' + (err.message||'Échec').slice(0,80);
+      ytPreviewDlBtn.disabled = false;
+      showToast('Erreur : ' + (err.message||'Échec').slice(0,60));
+    } finally {
+      ytPreviewSaveBtn.disabled = false;
+    }
+  }
+
+  ytImportBtn.addEventListener('click', analyzeYouTubeUrl);
+  ytImportInput.addEventListener('keydown', (e) => { if (e.key==='Enter') { e.preventDefault(); analyzeYouTubeUrl(); } });
+  ytImportInput.addEventListener('input', () => { if (!ytImportInput.value.trim()) { ytPreviewCard.hidden = true; _ytPreviewData = null; } });
+  ytPreviewSaveBtn.addEventListener('click', saveFromYouTube);
+  ytPreviewDlBtn.addEventListener('click', downloadToDevice);
 
   importDropzone.addEventListener('dragover', (e) => { e.preventDefault(); importDropzone.classList.add('dragover'); });
   importDropzone.addEventListener('dragleave', () => importDropzone.classList.remove('dragover'));
@@ -1792,6 +1978,26 @@
       btn.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
       showToast('Erreur: '+(err.message||'Échec'));
     }
+  }
+
+  // ===== cobalt.tools (yt-dlp backend) — tentative en premier avant Piped =====
+  async function downloadFromCobalt(videoId) {
+    const ytUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+    const r = await fetchWithTimeout('https://api.cobalt.tools/api/json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ url: ytUrl, isAudioOnly: true, aFormat: 'best', filenamePattern: 'basic' })
+    }, 15000);
+    if (!r.ok) throw new Error(`cobalt HTTP ${r.status}`);
+    const data = await r.json();
+    if (data.status === 'error') throw new Error(`cobalt: ${data.text || 'erreur'}`);
+    const streamUrl = sanitizeURL(data.url || '');
+    if (!streamUrl) throw new Error('cobalt: pas d\'URL');
+    const ar = await fetchWithTimeout(streamUrl, {}, 120000);
+    if (!ar.ok) throw new Error(`cobalt stream HTTP ${ar.status}`);
+    const blob = await ar.blob();
+    if (!blob || blob.size < 10000) throw new Error('cobalt: fichier trop petit');
+    return { blob, mimeType: ar.headers.get('content-type') || 'audio/mpeg' };
   }
 
   async function downloadFromPiped(videoId, onProgress) {
