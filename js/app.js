@@ -1501,6 +1501,12 @@
     if (el) el.classList.add('yt-playing');
     showToast('Chargement...');
 
+    if (shouldPreferDirectYouTubePlayback()) {
+      showToast('Lecture via YouTube...');
+      playYouTubeIFrame(videoId, index);
+      return;
+    }
+
     try {
       const blobUrl = await downloadYouTubeAsBlobUrl(videoId);
       if (blobUrl) {
