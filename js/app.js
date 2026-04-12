@@ -72,6 +72,8 @@
   const btnPlay           = $('#btnPlay');
   const btnPrev           = $('#btnPrev');
   const btnNext           = $('#btnNext');
+  const btnSkipBack       = $('#btnSkipBack');
+  const btnSkipFwd        = $('#btnSkipFwd');
   const btnShuffle        = $('#btnShuffle');
   const btnRepeat         = $('#btnRepeat');
   const progressBar       = $('#progressBar');
@@ -923,7 +925,9 @@
   const npTotalTime      = $('#npTotalTime');
   const npBtnShuffle     = $('#npBtnShuffle');
   const npBtnPrev        = $('#npBtnPrev');
+  const npBtnSkipBack    = $('#npBtnSkipBack');
   const npBtnPlay        = $('#npBtnPlay');
+  const npBtnSkipFwd     = $('#npBtnSkipFwd');
   const npBtnNext        = $('#npBtnNext');
   const npBtnRepeat      = $('#npBtnRepeat');
 
@@ -994,6 +998,8 @@
   npBtnNext.addEventListener('click', () => btnNext.click());
   npBtnShuffle.addEventListener('click', () => btnShuffle.click());
   npBtnRepeat.addEventListener('click', () => btnRepeat.click());
+  npBtnSkipBack.addEventListener('click', () => Player.seekRelative(-10));
+  npBtnSkipFwd.addEventListener('click',  () => Player.seekRelative(10));
 
   // NP screen favorite button
   nowPlayingFav.addEventListener('click', async () => {
@@ -1120,6 +1126,8 @@
     if (ytMode) { if (ytCurrentIndex < ytSearchResults.length - 1) playYouTubeVideo(ytCurrentIndex + 1); return; }
     Player.next();
   });
+  btnSkipBack.addEventListener('click', () => Player.seekRelative(-10));
+  btnSkipFwd.addEventListener('click',  () => Player.seekRelative(10));
   btnShuffle.addEventListener('click', () => {
     shuffleActive = Player.toggleShuffle();
     btnShuffle.classList.toggle('active', shuffleActive);
@@ -1189,10 +1197,12 @@
   });
 
   if ('mediaSession' in navigator) {
-    navigator.mediaSession.setActionHandler('play',          () => Player.togglePlay());
-    navigator.mediaSession.setActionHandler('pause',         () => Player.pause());
-    navigator.mediaSession.setActionHandler('previoustrack', () => btnPrev.click());
-    navigator.mediaSession.setActionHandler('nexttrack',     () => btnNext.click());
+    navigator.mediaSession.setActionHandler('play',           () => Player.togglePlay());
+    navigator.mediaSession.setActionHandler('pause',          () => Player.pause());
+    navigator.mediaSession.setActionHandler('previoustrack',  () => btnPrev.click());
+    navigator.mediaSession.setActionHandler('nexttrack',      () => btnNext.click());
+    navigator.mediaSession.setActionHandler('seekbackward',   (d) => Player.seekRelative(-(d && d.seekOffset ? d.seekOffset : 10)));
+    navigator.mediaSession.setActionHandler('seekforward',    (d) => Player.seekRelative(d && d.seekOffset ? d.seekOffset : 10));
   }
 
   document.addEventListener('keydown', (e) => {
@@ -1491,12 +1501,6 @@
     if (el) el.classList.add('yt-playing');
     showToast('Chargement...');
 
-    if (shouldPreferDirectYouTubePlayback()) {
-      showToast('Lecture via YouTube...');
-      playYouTubeIFrame(videoId, index);
-      return;
-    }
-
     try {
       const blobUrl = await downloadYouTubeAsBlobUrl(videoId);
       if (blobUrl) {
@@ -1587,7 +1591,9 @@
       artwork: ytCurrentVideo.thumbnail ? [{ src:ytCurrentVideo.thumbnail, sizes:'320x180', type:'image/jpeg' }] : [],
     });
     navigator.mediaSession.setActionHandler('previoustrack', () => btnPrev.click());
-    navigator.mediaSession.setActionHandler('nexttrack', () => btnNext.click());
+    navigator.mediaSession.setActionHandler('nexttrack',     () => btnNext.click());
+    navigator.mediaSession.setActionHandler('seekbackward',  (d) => Player.seekRelative(-(d && d.seekOffset ? d.seekOffset : 10)));
+    navigator.mediaSession.setActionHandler('seekforward',   (d) => Player.seekRelative(d && d.seekOffset ? d.seekOffset : 10));
   }
 
   function exitYTMode() {

@@ -692,3 +692,16 @@ input  { border:none; background:none; color:inherit; font:inherit; outline:none
 .playlist-card:not(.has-cover) .playlist-card-info {
   padding:18px 14px; text-align:center;
 }
+
+/* ===== Skip ±10s buttons ===== */
+.skip-btn svg { overflow:visible; }
+.skip-btn { opacity:.85; }
+.skip-btn:active { opacity:.5; transform:scale(.9); }
+
+/* Hide skip buttons in mini-player on small screens to save space */
+@media (max-width: 600px) {
+  .player-controls .skip-btn { display:none; }
+}
+
+/* NP screen skip buttons are always visible and sized nicely */
+.np-skip-btn { width:40px; height:40px; font-size:1rem; }
