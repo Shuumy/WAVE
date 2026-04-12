@@ -1419,17 +1419,22 @@
     }
   });
 
+  // Instances confirmées comme proxifiant leurs streams (URLs sur leur propre domaine).
+  // Les instances qui renvoient des URLs googlevideo.com directes sont inutilisables depuis JS (CORS).
+  // Elles sont gardées en fallback mais on essaie les proxifiantes d'abord.
   const PIPED_INSTANCES = [
-    'https://api.piped.private.coffee',
-    'https://pipedapi.kavin.rocks',
+    // ── Proxifiantes confirmées (essayées en premier) ──
+    'https://api.piped.private.coffee',   // confirmé par l'utilisateur
+    'https://pipedapi.kavin.rocks',        // instance officielle Piped
     'https://api.piped.projectsegfau.lt',
     'https://pipedapi.adminforge.de',
-    'https://pipedapi.tokhmi.xyz',
-    'https://piped-api.garudalinux.org',
-    'https://api.piped.yt',
-    'https://pipedapi.syncpundit.io',
-    'https://pipedapi-libre.kavin.rocks',
     'https://piped-api.privacy.com.de',
+    'https://piped-api.garudalinux.org',
+    // ── Statut inconnu (proxy ou CDN ?) ──
+    'https://api.piped.yt',
+    'https://pipedapi-libre.kavin.rocks',
+    'https://pipedapi.tokhmi.xyz',
+    'https://pipedapi.syncpundit.io',
     'https://pipedapi.leptons.xyz',
     'https://pipedapi.drgns.space',
     'https://pipedapi.owo.si',
@@ -1437,6 +1442,9 @@
     'https://pipedapi.darkness.services',
     'https://pipedapi.ducks.party',
   ];
+  // Instances qui ont prouvé (dans cette session) qu'elles proxifient leurs streams.
+  // Elles passent en tête de liste lors des appels suivants pour éviter de tester les autres.
+  const _pipedProxyConfirmed = new Set();
   const INVIDIOUS_FALLBACK = [
     'https://yewtu.be','https://invidious.nerdvpn.de','https://invidious.privacydev.net',
     'https://inv.tux.pizza','https://invidious.flokinet.to','https://invidious.fdn.fr',
@@ -1492,7 +1500,11 @@
   }
 
   async function downloadYouTubeAsBlobUrl(videoId) {
-    for (const inst of PIPED_INSTANCES) {
+    const ordered = [
+      ...PIPED_INSTANCES.filter(i => _pipedProxyConfirmed.has(i)),
+      ...PIPED_INSTANCES.filter(i => !_pipedProxyConfirmed.has(i)),
+    ];
+    for (const inst of ordered) {
       try {
         const r = await fetchWithTimeout(`${inst}/streams/${videoId}`, { cache:'no-cache' }, 8000);
         if (!r.ok) continue;
@@ -1501,11 +1513,12 @@
         const sorted = data.audioStreams.filter(s=>s.url&&s.mimeType).sort((a,b)=>(b.bitrate||0)-(a.bitrate||0));
         let instHost = '';
         try { instHost = new URL(inst).hostname; } catch {}
+        const hasProxied = sorted.some(s => { const u = sanitizeURL(s.url); return u && instHost && u.includes(instHost); });
+        if (!hasProxied) continue;
         for (const stream of sorted.slice(0,3)) {
           try {
             const rawUrl = sanitizeURL(stream.url);
             if (!rawUrl) continue;
-            // URLs CDN externes : pas de CORS → skip ; on ne garde que les URLs proxifiées par l'instance
             const isExternal = instHost && !rawUrl.includes(instHost);
             if (isExternal) continue;
             try {
@@ -1514,7 +1527,7 @@
               const contentType = ar.headers.get('content-type') || '';
               if (contentType && !contentType.startsWith('audio/') && !contentType.startsWith('video/') && !contentType.includes('octet-stream')) continue;
               const blob = await ar.blob();
-              if (blob.size > 5000) return URL.createObjectURL(blob);
+              if (blob.size > 5000) { _pipedProxyConfirmed.add(inst); return URL.createObjectURL(blob); }
             } catch {}
           } catch {}
         }
@@ -1751,11 +1764,19 @@
     try {
       showToast('Téléchargement en cours...');
       let res;
+      // 1. cobalt.tools (yt-dlp) — le plus fiable
       try {
-        res = await downloadFromPiped(videoId, (c,t)=>{if(c>1)showToast(`Piped ${c}/${t}...`);});
+        const { blob, mimeType } = await downloadFromCobalt(videoId);
+        res = { blob, mimeType, pipedTitle: item.title||'', pipedUploader: item.uploaderName||'', pipedDuration: 0 };
       } catch {
-        showToast('Piped indisponible, essai Invidious...');
-        res = await downloadFromInvidious(videoId, (c,t)=>showToast(`Invidious ${c}/${t}...`));
+        // 2. Piped
+        try {
+          res = await downloadFromPiped(videoId, (c,t)=>{if(c>1)showToast(`Piped ${c}/${t}...`);});
+        } catch {
+          // 3. Invidious
+          showToast('Piped indisponible, essai Invidious...');
+          res = await downloadFromInvidious(videoId, (c,t)=>showToast(`Invidious ${c}/${t}...`));
+        }
       }
       const { blob, mimeType, pipedTitle, pipedUploader, pipedDuration } = res;
       const mime = (mimeType||'').split(';')[0];
@@ -1795,11 +1816,15 @@
   }
 
   async function downloadFromPiped(videoId, onProgress) {
-    for (let i=0; i<PIPED_INSTANCES.length; i++) {
-      const inst = PIPED_INSTANCES[i];
+    // Les instances confirmées comme proxifiantes passent en tête (plus rapide en session)
+    const ordered = [
+      ...PIPED_INSTANCES.filter(i => _pipedProxyConfirmed.has(i)),
+      ...PIPED_INSTANCES.filter(i => !_pipedProxyConfirmed.has(i)),
+    ];
+    for (let i=0; i<ordered.length; i++) {
+      const inst = ordered[i];
       try {
-        if(onProgress) onProgress(i+1, PIPED_INSTANCES.length);
-        // cache:'no-cache' évite les URLs de streams expirées en cache navigateur
+        if(onProgress) onProgress(i+1, ordered.length);
         const r = await fetchWithTimeout(`${inst}/streams/${videoId}`, { cache:'no-cache' }, 12000);
         if(!r.ok) continue;
         const data = await r.json();
@@ -1807,32 +1832,29 @@
         const sorted = data.audioStreams.filter(s=>s.url&&s.mimeType).sort((a,b)=>(b.bitrate||0)-(a.bitrate||0));
         if(!sorted.length) continue;
 
-        // Hostname de l'instance pour détecter si l'URL est déjà proxifiée
         let instHost = '';
         try { instHost = new URL(inst).hostname; } catch {}
 
-        // Essayer les 3 meilleures qualités
+        // Vérifier si au moins un stream est proxifié avant de perdre du temps
+        const hasProxied = sorted.some(s => { const u = sanitizeURL(s.url); return u && instHost && u.includes(instHost); });
+        if (!hasProxied) continue; // instance CDN-only → skip immédiat, pas de 120s de timeout
+
         for (const stream of sorted.slice(0, 3)) {
           const rawUrl = sanitizeURL(stream.url);
           if (!rawUrl) continue;
-
-          // Les URLs externes (CDN YouTube) ne fonctionnent pas via fetch() JS car
-          // YouTube ne retourne pas Access-Control-Allow-Origin. On ne garde que
-          // les URLs déjà proxifiées par l'instance Piped (qui elles ont les bons headers CORS).
           const isExternal = instHost && !rawUrl.includes(instHost);
           if (isExternal) continue;
 
           try {
-            // Timeout long (120 s) : un fichier audio de 4-8 Mo sur mobile peut dépasser 35 s
             const ar = await fetchWithTimeout(rawUrl, {}, 120000);
             if (!ar.ok) continue;
             const contentType = ar.headers.get('content-type') || '';
-            // Accepter aussi content-type vide (certains proxies ne le définissent pas)
             if (contentType && !contentType.startsWith('audio/') && !contentType.startsWith('video/') && !contentType.includes('octet-stream')) continue;
             const blob = await ar.blob();
             if (!blob || blob.size < 10000) continue;
+            _pipedProxyConfirmed.add(inst); // mémoriser pour les prochains appels
             return { blob, mimeType:stream.mimeType, pipedTitle:data.title, pipedUploader:data.uploader, pipedDuration:data.duration, thumbnailUrl:data.thumbnailUrl||'' };
-          } catch { /* essayer le stream suivant */ }
+          } catch { /* stream suivant */ }
         }
       } catch(e) {
         if (e.name !== 'AbortError') console.error('Piped download error:', inst);
