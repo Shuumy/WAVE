@@ -2004,14 +2004,15 @@
   // ===== cobalt.tools (yt-dlp backend) — tentative en premier avant Piped =====
   async function downloadFromCobalt(videoId) {
     const ytUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
-    const r = await fetchWithTimeout('https://api.cobalt.tools/api/json', {
+    // API cobalt v10+ : endpoint racine, nouveaux paramètres downloadMode / audioFormat
+    const r = await fetchWithTimeout('https://api.cobalt.tools/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify({ url: ytUrl, isAudioOnly: true, aFormat: 'best', filenamePattern: 'basic' })
+      body: JSON.stringify({ url: ytUrl, downloadMode: 'audio', audioFormat: 'best' })
     }, 15000);
     if (!r.ok) throw new Error(`cobalt HTTP ${r.status}`);
     const data = await r.json();
-    if (data.status === 'error') throw new Error(`cobalt: ${data.text || 'erreur'}`);
+    if (data.status === 'error') throw new Error(`cobalt: ${data.error?.code || 'erreur'}`);
     const streamUrl = sanitizeURL(data.url || '');
     if (!streamUrl) throw new Error('cobalt: pas d\'URL');
     const ar = await fetchWithTimeout(streamUrl, {}, 120000);
