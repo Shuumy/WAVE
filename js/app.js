@@ -1397,6 +1397,23 @@
         break;
       } catch {}
     }
+    // Fallback Invidious pour les métadonnées si Piped a échoué
+    if (!rawTitle) {
+      const invs = await getInvidiousInstances();
+      for (const inst of invs) {
+        try {
+          const r = await fetchWithTimeout(`${inst}/api/v1/videos/${videoId}?fields=title,author,lengthSeconds,videoThumbnails`, {}, 10000);
+          if (!r.ok) continue;
+          const d = await r.json();
+          if (!d.title) continue;
+          rawTitle = d.title || ''; uploader = d.author || '';
+          duration = d.lengthSeconds || 0;
+          const thumb = d.videoThumbnails?.find(t => t.quality === 'high') || d.videoThumbnails?.[0];
+          thumbnailUrl = sanitizeURL(thumb?.url || '') || '';
+          break;
+        } catch {}
+      }
+    }
     ytImportBtn.disabled = false;
     let displayTitle = rawTitle || 'Titre inconnu', displayArtist = uploader || '';
     const dm = rawTitle.match(/^(.+?)\s*[-–—]\s*(.+)$/);
@@ -1459,7 +1476,7 @@
       const finalTitle = title || pipedTitle || 'Titre inconnu';
       const finalArtist = artist || pipedUploader || 'Artiste inconnu';
       let coverArt = null;
-      const thumb = thumbnailUrl || sanitizeURL((typeof res !== 'undefined' && res?.thumbnailUrl) || '');
+      const thumb = thumbnailUrl || '';
       if (thumb) {
         try {
           const tr = await fetchWithTimeout(thumb, {}, 10000);
@@ -1609,23 +1626,21 @@
   // Les instances qui renvoient des URLs googlevideo.com directes sont inutilisables depuis JS (CORS).
   // Elles sont gardées en fallback mais on essaie les proxifiantes d'abord.
   const PIPED_INSTANCES = [
-    // ── Proxifiantes confirmées (essayées en premier) ──
-    'https://api.piped.private.coffee',   // confirmé par l'utilisateur
-    'https://pipedapi.kavin.rocks',        // instance officielle Piped
-    'https://api.piped.projectsegfau.lt',
+    // Liste officielle TeamPiped (https://github.com/TeamPiped/Piped/wiki/Instances)
+    // Les instances confirmées comme proxifiantes passent en tête de liste.
+    'https://api.piped.private.coffee',
+    'https://pipedapi.kavin.rocks',
     'https://pipedapi.adminforge.de',
     'https://piped-api.privacy.com.de',
-    'https://piped-api.garudalinux.org',
-    // ── Statut inconnu (proxy ou CDN ?) ──
     'https://api.piped.yt',
-    'https://pipedapi-libre.kavin.rocks',
-    'https://pipedapi.tokhmi.xyz',
-    'https://pipedapi.syncpundit.io',
+    'https://pipedapi.reallyaweso.me',
+    'https://pipedapi.nosebs.ru',
+    'https://pipedapi.darkness.services',
+    'https://pipedapi.orangenet.cc',
     'https://pipedapi.leptons.xyz',
     'https://pipedapi.drgns.space',
     'https://pipedapi.owo.si',
     'https://piped-api.codespace.cz',
-    'https://pipedapi.darkness.services',
     'https://pipedapi.ducks.party',
   ];
   // Instances qui ont prouvé (dans cette session) qu'elles proxifient leurs streams.
@@ -1682,6 +1697,28 @@
         if (e.name !== 'AbortError') console.error('Piped search error:', inst);
       }
     }
+    // Fallback Invidious si tous les serveurs Piped sont indisponibles
+    const invs = await getInvidiousInstances();
+    for (const inst of invs) {
+      try {
+        const r = await fetchWithTimeout(`${inst}/api/v1/search?q=${encodeURIComponent(safeQ)}&type=video`, {}, 8000);
+        if (!r.ok) continue;
+        const data = await r.json();
+        if (!Array.isArray(data) || !data.length) continue;
+        // Transformer le format Invidious vers le format Piped attendu par renderYTResults
+        const items = data.slice(0, 12).filter(v => v.videoId && v.title).map(v => ({
+          type: 'stream',
+          url: `/watch?v=${v.videoId}`,
+          title: v.title || '',
+          uploaderName: v.author || '',
+          thumbnail: (v.videoThumbnails?.find(t => t.quality === 'high') || v.videoThumbnails?.[0])?.url || '',
+          duration: v.lengthSeconds || 0,
+        }));
+        if (items.length) return items;
+      } catch(e) {
+        if (e.name !== 'AbortError') console.error('Invidious search error:', inst);
+      }
+    }
     throw new Error('Aucun serveur disponible');
   }
 
@@ -1697,16 +1734,13 @@
         const data = await r.json();
         if (!data.audioStreams?.length) continue;
         const sorted = data.audioStreams.filter(s=>s.url&&s.mimeType).sort((a,b)=>(b.bitrate||0)-(a.bitrate||0));
-        let instHost = '';
-        try { instHost = new URL(inst).hostname; } catch {}
-        const hasProxied = sorted.some(s => { const u = sanitizeURL(s.url); return u && instHost && u.includes(instHost); });
+        // Vérifier qu'au moins un stream est proxifié (URL non-Google) — sinon CORS bloqué
+        const hasProxied = sorted.some(s => { const u = sanitizeURL(s.url); return u && !u.includes('googlevideo.com'); });
         if (!hasProxied) continue;
         for (const stream of sorted.slice(0,3)) {
           try {
             const rawUrl = sanitizeURL(stream.url);
-            if (!rawUrl) continue;
-            const isExternal = instHost && !rawUrl.includes(instHost);
-            if (isExternal) continue;
+            if (!rawUrl || rawUrl.includes('googlevideo.com')) continue;
             try {
               const ar = await fetchWithTimeout(rawUrl, {}, 120000);
               if (!ar.ok) continue;
@@ -2039,18 +2073,13 @@
         const sorted = data.audioStreams.filter(s=>s.url&&s.mimeType).sort((a,b)=>(b.bitrate||0)-(a.bitrate||0));
         if(!sorted.length) continue;
 
-        let instHost = '';
-        try { instHost = new URL(inst).hostname; } catch {}
-
-        // Vérifier si au moins un stream est proxifié avant de perdre du temps
-        const hasProxied = sorted.some(s => { const u = sanitizeURL(s.url); return u && instHost && u.includes(instHost); });
-        if (!hasProxied) continue; // instance CDN-only → skip immédiat, pas de 120s de timeout
+        // Vérifier si au moins un stream est proxifié (URL non-Google) — évite 120s de timeout inutile
+        const hasProxied = sorted.some(s => { const u = sanitizeURL(s.url); return u && !u.includes('googlevideo.com'); });
+        if (!hasProxied) continue;
 
         for (const stream of sorted.slice(0, 3)) {
           const rawUrl = sanitizeURL(stream.url);
-          if (!rawUrl) continue;
-          const isExternal = instHost && !rawUrl.includes(instHost);
-          if (isExternal) continue;
+          if (!rawUrl || rawUrl.includes('googlevideo.com')) continue;
 
           try {
             const ar = await fetchWithTimeout(rawUrl, {}, 120000);
@@ -2081,10 +2110,15 @@
         const data = await r.json();
         const fmts = (data.adaptiveFormats||[]).filter(f=>f.type?.startsWith('audio/')&&f.itag).sort((a,b)=>(parseInt(b.bitrate)||0)-(parseInt(a.bitrate)||0));
         if(!fmts.length) continue;
-        const url = `${inst}/latest_version?id=${encodeURIComponent(videoId)}&itag=${encodeURIComponent(fmts[0].itag)}&local=true`;
-        const ar = await fetchWithTimeout(url, {}, 120000); if(!ar.ok) continue;
-        const blob = await ar.blob(); if(!blob||blob.size<10000) continue;
-        return { blob, mimeType:fmts[0].type.split(';')[0], pipedTitle:data.title, pipedUploader:data.author, pipedDuration:data.lengthSeconds };
+        // Essayer jusqu'à 3 formats par instance (du meilleur bitrate au plus bas)
+        for (const fmt of fmts.slice(0, 3)) {
+          try {
+            const url = `${inst}/latest_version?id=${encodeURIComponent(videoId)}&itag=${encodeURIComponent(fmt.itag)}&local=true`;
+            const ar = await fetchWithTimeout(url, {}, 120000); if(!ar.ok) continue;
+            const blob = await ar.blob(); if(!blob||blob.size<10000) continue;
+            return { blob, mimeType:fmt.type.split(';')[0], pipedTitle:data.title, pipedUploader:data.author, pipedDuration:data.lengthSeconds };
+          } catch { /* format suivant */ }
+        }
       } catch(e) {
         if (e.name !== 'AbortError') console.error('Invidious download error:', inst);
       }
