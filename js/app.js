@@ -65,7 +65,6 @@
   // ═══════════════════════════════════════════════════
   const navBtns           = $$('.nav-btn');
   const views             = $$('.view');
-  const homeSearchInput   = $('#homeSearchInput');
   const playerTitle       = $('#playerTitle');
   const playerArtist      = $('#playerArtist');
   const playerArtwork     = $('#playerArtwork');
@@ -73,6 +72,8 @@
   const btnPlay           = $('#btnPlay');
   const btnPrev           = $('#btnPrev');
   const btnNext           = $('#btnNext');
+  const btnSkipBack       = $('#btnSkipBack');
+  const btnSkipFwd        = $('#btnSkipFwd');
   const btnShuffle        = $('#btnShuffle');
   const btnRepeat         = $('#btnRepeat');
   const progressBar       = $('#progressBar');
@@ -110,7 +111,11 @@
   let currentPlaylistView = null;
   let selectMode = false;
   let selectedTrackIds = new Set();
-  let librarySort = 'date';
+  let librarySort = { key: 'date', dir: 'desc' };
+  let librarySearchQuery = '';
+  let playlistSort = { key: 'default', dir: 'asc' };
+  let shuffleActive = false;
+  let repeatMode = 'none';
 
   // ===== Confirm Dialog =====
   function showConfirm(message) {
@@ -142,6 +147,20 @@
   function getAllTracks()          { return [...userTracks]; }
   function findTrack(id)          { return userTracks.find(t => t.id === id); }
 
+  // ===== Shuffle Play =====
+  function shufflePlay(tracks) {
+    if (!tracks || !tracks.length) { showToast('Aucun morceau à lire'); return; }
+    if (!shuffleActive) {
+      shuffleActive = Player.toggleShuffle();
+      btnShuffle.classList.toggle('active', shuffleActive);
+      npBtnShuffle.classList.toggle('active', shuffleActive);
+    }
+    const idx = Math.floor(Math.random() * tracks.length);
+    Player.setQueue(tracks, idx);
+    Player.play(tracks[idx]);
+    showToast('Lecture aléatoire');
+  }
+
   // ===== Navigation =====
   navBtns.forEach(btn => {
     btn.addEventListener('click', () => {
@@ -170,6 +189,14 @@
       setTimeout(() => { toast.hidden = true; }, 300);
     }, 2500);
   }
+
+  // ===== Settings =====
+  const settingsBtn     = $('#settingsBtn');
+  const settingsOverlay = $('#settingsOverlay');
+  const closeSettingsBtn= $('#closeSettingsBtn');
+  settingsBtn.addEventListener('click', () => { settingsOverlay.hidden = false; });
+  closeSettingsBtn.addEventListener('click', () => { settingsOverlay.hidden = true; });
+  settingsOverlay.addEventListener('click', (e) => { if (e.target === settingsOverlay) settingsOverlay.hidden = true; });
 
   // ===== Profile Picture =====
   async function loadProfilePicture() {
@@ -275,50 +302,215 @@
   });
 
   // ===== Sort =====
-  function applySort(tracks) {
+  const SORT_OPTIONS = [
+    { key:'date',     label:"Date d'ajout" },
+    { key:'year',     label:'Date de sortie' },
+    { key:'duration', label:'Durée' },
+    { key:'title',    label:'Titre' },
+    { key:'artist',   label:'Artiste' },
+  ];
+  function applySort(tracks, sortState) {
+    const st = sortState || librarySort;
+    if (st.key === 'default') return [...tracks]; // ordre original de la playlist
     const s = [...tracks];
-    if (librarySort === 'title')  s.sort((a,b) => a.title.localeCompare(b.title));
-    else if (librarySort === 'artist') s.sort((a,b) => a.artist.localeCompare(b.artist));
-    else s.sort((a,b) => (b.importedAt||0) - (a.importedAt||0));
+    const asc = st.dir === 'asc';
+    s.sort((a, b) => {
+      let va, vb;
+      switch (st.key) {
+        case 'title':    va = transliterate(a.title);  vb = transliterate(b.title);  break;
+        case 'artist':   va = transliterate(a.artist); vb = transliterate(b.artist); break;
+        case 'duration': va = a.duration || 0;         vb = b.duration || 0;         break;
+        case 'year':     va = a.releaseYear || 0;      vb = b.releaseYear || 0;      break;
+        default:         va = a.importedAt || 0;       vb = b.importedAt || 0;       break;
+      }
+      if (typeof va === 'string') return asc ? va.localeCompare(vb) : vb.localeCompare(va);
+      return asc ? va - vb : vb - va;
+    });
     return s;
   }
-  function renderSortRow(container) {
+  function renderSortRow(container, sortState, onSortChange) {
+    const st = sortState || librarySort;
+    const onChange = onSortChange || (() => refreshLibraryView());
     const row = document.createElement('div');
     row.className = 'sort-row';
-    // Contenu statique — pas de données utilisateur
-    row.innerHTML = `
-      <span class="sort-label">Trier :</span>
-      <button class="sort-btn ${librarySort==='date'?'active':''}" data-sort="date">Date d'ajout</button>
-      <button class="sort-btn ${librarySort==='title'?'active':''}" data-sort="title">Titre A→Z</button>
-      <button class="sort-btn ${librarySort==='artist'?'active':''}" data-sort="artist">Artiste A→Z</button>`;
-    row.querySelectorAll('.sort-btn').forEach(b => b.addEventListener('click', () => { librarySort = b.dataset.sort; refreshLibraryView(); }));
+    const label = document.createElement('span');
+    label.className = 'sort-label';
+    label.textContent = 'Trier :';
+    row.appendChild(label);
+    SORT_OPTIONS.forEach(({ key, label: lbl }) => {
+      const btn = document.createElement('button');
+      const isActive = st.key === key;
+      btn.className = 'sort-btn' + (isActive ? ' active' : '');
+      btn.dataset.sort = key;
+      if (isActive) {
+        const dir = document.createElement('span');
+        dir.className = 'sort-dir';
+        dir.textContent = st.dir === 'asc' ? '↑' : '↓';
+        btn.textContent = lbl;
+        btn.appendChild(dir);
+      } else {
+        btn.textContent = lbl;
+      }
+      btn.addEventListener('click', () => {
+        if (st.key === key) {
+          st.dir = st.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+          st.key = key;
+          st.dir = (key === 'title' || key === 'artist') ? 'asc' : 'desc';
+        }
+        onChange();
+      });
+      row.appendChild(btn);
+    });
     container.insertBefore(row, container.firstChild);
   }
 
-  // ===== Cover Art =====
-  function extractCoverArt(file) {
+  // ===== Translitération pour recherche multilingue =====
+  function transliterate(str) {
+    return (str || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  }
+  function searchFilter(tracks, query) {
+    if (!query) return tracks;
+    const q = transliterate(query);
+    return tracks.filter(t =>
+      transliterate(t.title).includes(q) ||
+      transliterate(t.artist).includes(q) ||
+      transliterate(t.album || '').includes(q)
+    );
+  }
+
+  // ===== Extraction complète des métadonnées (ID3 + fallback nom de fichier) =====
+  function extractAllMetadata(file) {
+    const { title: nameTitle, artist: nameArtist } = parseName(file.name);
     return new Promise((resolve) => {
-      if (!window.jsmediatags) { resolve(null); return; }
+      const fallback = { title: nameTitle, artist: nameArtist, album: '', genre: '', releaseYear: null, coverArt: null };
+      if (!window.jsmediatags) { resolve(fallback); return; }
       try {
         jsmediatags.read(file, {
           onSuccess: (tag) => {
-            const pic = tag.tags?.picture;
+            const t = tag.tags || {};
+            const title  = (t.title  || '').trim() || nameTitle;
+            const artist = (t.artist || '').trim() || nameArtist;
+            const album  = (t.album  || '').trim();
+            // Nettoyer le genre ID3v1 (ex: "(17)" → "Rock")
+            const rawGenre = (t.genre || '').trim();
+            const genre = rawGenre.replace(/^\(?\d+\)?\s*/, '').trim();
+            // Année — ID3v2.3 (TYER) ou ID3v2.4 (TDRC)
+            const yearRaw = (t.year || (t.TDRC && t.TDRC.data) || '').toString().trim();
+            const releaseYear = yearRaw ? (parseInt(yearRaw.slice(0, 4)) || null) : null;
+            // Jaquette
+            let coverArt = null;
+            const pic = t.picture;
             if (pic) {
               try {
                 const bytes = new Uint8Array(pic.data);
                 let b = '';
                 bytes.forEach(c => b += String.fromCharCode(c));
                 const dataUrl = `data:${pic.format};base64,${btoa(b)}`;
-                // Valider que c'est bien une image
-                resolve(dataUrl.startsWith('data:image/') ? dataUrl : null);
-              } catch { resolve(null); }
-            } else resolve(null);
+                if (dataUrl.startsWith('data:image/')) coverArt = dataUrl;
+              } catch {}
+            }
+            resolve({ title, artist, album, genre, releaseYear, coverArt });
           },
-          onError: () => resolve(null),
+          onError: () => resolve(fallback),
         });
-      } catch { resolve(null); }
+      } catch { resolve(fallback); }
     });
   }
+
+  // ===== Options Sheet =====
+  const optionsOverlay = $('#optionsOverlay');
+  const optionsList    = $('#optionsList');
+  const optionsArtwork = $('#optionsArtwork');
+  const optionsTitle   = $('#optionsTitle');
+  const optionsArtist  = $('#optionsArtist');
+
+  function showTrackOptions(track, ctx = {}) {
+    // Artwork
+    const artSrc = sanitizeURL(generateArtwork(track)) || generateArtwork(track);
+    optionsArtwork.innerHTML = '';
+    const img = document.createElement('img');
+    img.src = artSrc; img.alt = '';
+    optionsArtwork.appendChild(img);
+    optionsTitle.textContent  = track.title;
+    optionsArtist.textContent = track.artist;
+
+    optionsList.innerHTML = '';
+    const addItem = (icon, label, cls, handler) => {
+      const btn = document.createElement('button');
+      btn.className = 'options-item' + (cls ? ' ' + cls : '');
+      btn.innerHTML = icon;
+      const span = document.createElement('span');
+      span.textContent = label;
+      btn.appendChild(span);
+      btn.addEventListener('click', () => { closeOptionsSheet(); handler(); });
+      optionsList.appendChild(btn);
+    };
+
+    // Retirer de la playlist / Supprimer
+    if (ctx.playlistId) {
+      addItem('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+        'Retirer de la playlist', '', async () => {
+          await DB.removeTrackFromPlaylist(ctx.playlistId, track.id);
+          showToast('Retiré de la playlist');
+          ctx.onRemove?.();
+        });
+    } else {
+      addItem('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+        'Supprimer', 'danger', async () => {
+          const ok = await showConfirm(`Supprimer "${track.title}" ?`);
+          if (!ok) return;
+          await DB.removeUserTrack(track.id);
+          userTracks = userTracks.filter(t => t.id !== track.id);
+          showToast(`"${track.title}" supprimé`);
+          refreshAllViews();
+        });
+    }
+
+    // Télécharger
+    addItem('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+      'Télécharger le fichier', '', async () => {
+        try {
+          const blob = await DB.getUserAudioBlob(track.id);
+          if (!blob) { showToast('Fichier introuvable'); return; }
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = track.fileName || (track.title + '.mp3');
+          document.body.appendChild(a); a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 5000);
+          showToast('Téléchargement lancé');
+        } catch { showToast('Erreur lors du téléchargement'); }
+      });
+
+    // Copier le lien YouTube (uniquement pour les morceaux YouTube)
+    if (track.youtubeId) {
+      addItem('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+        'Copier le lien YouTube', '', async () => {
+          const ytUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(track.youtubeId)}`;
+          try { await navigator.clipboard.writeText(ytUrl); showToast('Lien copié'); }
+          catch { showToast('Impossible de copier'); }
+        });
+    }
+
+    // Partager
+    if (navigator.share) {
+      addItem('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>',
+        'Partager', '', async () => {
+          try {
+            const shareData = { title: track.title, text: `${track.artist} — ${track.title}` };
+            if (track.youtubeId) shareData.url = `https://www.youtube.com/watch?v=${encodeURIComponent(track.youtubeId)}`;
+            await navigator.share(shareData);
+          } catch (err) { if (err.name !== 'AbortError') showToast('Partage non disponible'); }
+        });
+    }
+
+    optionsOverlay.hidden = false;
+  }
+
+  function closeOptionsSheet() { optionsOverlay.hidden = true; }
+  optionsOverlay.addEventListener('click', (e) => { if (e.target === optionsOverlay) closeOptionsSheet(); });
 
   // ===== Track Element =====
   /**
@@ -336,22 +528,15 @@
     if (ct && ct.id === track.id) div.classList.add('playing');
     if (selectMode && selectedTrackIds.has(track.id)) div.classList.add('selected');
 
-    // L'artwork est soit une data:image/ URL (safe) soit une URL https: générée par generateArtwork
     const artSrc = sanitizeURL(generateArtwork(track)) || generateArtwork(track);
 
-    let actionBtn = '';
-    if (playlistId) {
-      // Contenu statique : pas d'injection
-      actionBtn = `<button class="icon-btn remove-pl-btn" title="Retirer">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>`;
-    } else {
-      actionBtn = `<button class="icon-btn playlist-add-btn" title="Ajouter à une playlist">
+    // Dans une playlist : pas de bouton "ajouter à playlist" (le menu options gère "retirer")
+    const actionBtn = playlistId ? '' : `<button class="icon-btn playlist-add-btn" title="Ajouter à une playlist">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
       </button>`;
-    }
-    const deleteBtn = showDelete ? `<button class="icon-btn delete-track-btn" title="Supprimer">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+    // Bouton options (3 points) remplace l'icône poubelle
+    const optionsBtn = (showDelete || playlistId) ? `<button class="icon-btn track-options-btn" title="Options">
+      <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
     </button>` : '';
 
     // ⚠️ SÉCURITÉ : esc() appliqué sur toutes les données dynamiques
@@ -370,7 +555,7 @@
         <button class="icon-btn fav-btn" title="Favori">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
         </button>
-        ${actionBtn}${deleteBtn}
+        ${actionBtn}${optionsBtn}
       </div>`;
 
     DB.isFavorite(track.id).then(isFav => {
@@ -392,34 +577,21 @@
       }
     });
 
-    if (playlistId) {
-      div.querySelector('.remove-pl-btn').addEventListener('click', async (e) => {
-        e.stopPropagation();
-        await DB.removeTrackFromPlaylist(playlistId, track.id);
-        wrap.style.cssText = 'transition:opacity .2s,transform .2s;opacity:0;transform:translateX(10px)';
-        setTimeout(() => { wrap.remove(); onRemoveFromPlaylist?.(); }, 200);
-        showToast('Retiré de la playlist');
-      });
-    } else {
-      div.querySelector('.playlist-add-btn').addEventListener('click', (e) => {
-        e.stopPropagation(); if (selectMode) return;
-        openPlaylistModal(track.id);
-      });
-    }
+    div.querySelector('.playlist-add-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation(); if (selectMode) return;
+      openPlaylistModal(track.id);
+    });
 
-    if (showDelete) {
-      div.querySelector('.delete-track-btn').addEventListener('click', async (e) => {
+    if (showDelete || playlistId) {
+      div.querySelector('.track-options-btn').addEventListener('click', (e) => {
         e.stopPropagation(); if (selectMode) return;
-        const ok = await showConfirm(`Supprimer "${track.title}" ?`);
-        if (!ok) return;
-        wrap.style.cssText = 'transition:opacity .2s,transform .2s;opacity:0;transform:translateX(-10px)';
-        setTimeout(async () => {
-          await DB.removeUserTrack(track.id);
-          userTracks = userTracks.filter(t => t.id !== track.id);
-          wrap.remove();
-          showToast(`"${track.title}" supprimé`);
-          refreshAllViews();
-        }, 200);
+        showTrackOptions(track, {
+          playlistId,
+          onRemove: () => {
+            wrap.style.cssText = 'transition:opacity .2s,transform .2s;opacity:0;transform:translateX(10px)';
+            setTimeout(() => { wrap.remove(); onRemoveFromPlaylist?.(); }, 200);
+          },
+        });
       });
     }
 
@@ -433,7 +605,7 @@
     div.addEventListener('touchmove', () => clearTimeout(lpTimer));
 
     div.addEventListener('click', (e) => {
-      if (e.target.closest('.fav-btn,.playlist-add-btn,.remove-pl-btn,.delete-track-btn')) return;
+      if (e.target.closest('.fav-btn,.playlist-add-btn,.track-options-btn')) return;
       if (selectMode) { toggleTrackSelect(track.id, div); return; }
       if (ytMode) exitYTMode();
       Player.setQueue(list, index);
@@ -500,62 +672,78 @@
 
   // ===== Home View =====
   async function refreshHomeView() {
-    const query = homeSearchInput?.value.toLowerCase().trim() || '';
-    const popSec   = $('#popularSection');
-    const recSec   = $('#recentSection');
-    const results  = $('#homeSearchResults');
-    const all = getAllTracks();
-
-    if (query) {
-      if (popSec) popSec.hidden = true;
-      if (recSec) recSec.hidden = true;
-      if (results) {
-        results.hidden = false;
-        const filtered = all.filter(t =>
-          t.title.toLowerCase().includes(query) ||
-          t.artist.toLowerCase().includes(query) ||
-          (t.album && t.album.toLowerCase().includes(query))
-        );
-        renderTrackList(results, filtered, { showDelete: true });
-      }
-    } else {
-      if (popSec) popSec.hidden = false;
-      if (recSec) recSec.hidden = false;
-      if (results) { results.hidden = true; results.innerHTML = ''; }
-      const pop = $('#popularTracks');
-      if (pop) {
-        if (!all.length) pop.innerHTML = '<p class="empty-state">Aucun morceau. Va dans Importer pour ajouter ta musique.</p>';
-        else renderTrackList(pop, all, { showDelete: true });
-      }
-      const recentIds = await DB.getRecent();
-      const rec = $('#recentTracks');
-      if (rec) {
-        const recentTracks = recentIds.map(r => findTrack(r.id)).filter(Boolean).slice(0, 8);
-        if (!recentTracks.length) rec.innerHTML = '<p class="empty-state">Aucun morceau joué récemment.</p>';
-        else renderTrackList(rec, recentTracks);
-      }
+    const recentIds = await DB.getRecent();
+    const rec = $('#recentTracks');
+    if (rec) {
+      const recentTracks = recentIds.map(r => findTrack(r.id)).filter(Boolean).slice(0, 8);
+      if (!recentTracks.length) rec.innerHTML = '<p class="empty-state">Aucun morceau joué récemment.</p>';
+      else renderTrackList(rec, recentTracks);
+    }
+    // Bouton aléatoire dans le titre de section (ajouté une seule fois)
+    const sTitle = document.querySelector('#recentSection .section-title');
+    if (sTitle && !sTitle.querySelector('.shuffle-section-btn')) {
+      const sb = document.createElement('button');
+      sb.className = 'shuffle-section-btn';
+      sb.title = 'Lire en aléatoire';
+      sb.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg> Aléatoire';
+      sb.addEventListener('click', () => shufflePlay(getAllTracks()));
+      sTitle.appendChild(sb);
     }
   }
-  homeSearchInput?.addEventListener('input', () => refreshHomeView());
 
   // ===== Library View =====
+  // Wiring search bar
+  const libSearchInput = $('#librarySearchInput');
+  const libSearchClear = $('#librarySearchClear');
+  const libSearchBar   = $('#librarySearchBar');
+
+  libSearchInput?.addEventListener('input', () => {
+    librarySearchQuery = libSearchInput.value;
+    libSearchClear.hidden = !librarySearchQuery;
+    const tab = $('.library-tabs .tab-btn.active')?.dataset.tab;
+    if (tab !== 'playlists') refreshLibraryView();
+  });
+  libSearchClear?.addEventListener('click', () => {
+    libSearchInput.value = ''; librarySearchQuery = '';
+    libSearchClear.hidden = true;
+    refreshLibraryView();
+  });
+
   async function refreshLibraryView() {
     const tab = $('.library-tabs .tab-btn.active')?.dataset.tab;
     const content = $('#libraryContent');
+    // Masquer la searchbar pour les playlists
+    if (libSearchBar) libSearchBar.hidden = (tab === 'playlists');
     if (tab === 'all') {
       content.innerHTML = '<div class="track-list" id="libraryTracks"></div>';
       renderSortRow(content);
-      const tracks = applySort(getAllTracks());
+      const tracks = searchFilter(applySort(getAllTracks()), librarySearchQuery);
+      if (tracks.length) {
+        const sb = document.createElement('button');
+        sb.className = 'shuffle-section-btn';
+        sb.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg> Lire en aléatoire';
+        sb.style.marginBottom = '12px';
+        sb.addEventListener('click', () => shufflePlay(tracks));
+        content.insertBefore(sb, $('#libraryTracks'));
+      }
       const c = $('#libraryTracks');
-      if (!tracks.length) c.innerHTML = '<p class="empty-state">Aucun morceau importé.</p>';
+      if (!tracks.length) c.innerHTML = `<p class="empty-state">${librarySearchQuery ? 'Aucun résultat.' : 'Aucun morceau importé.'}</p>`;
       else renderTrackList(c, tracks, { showDelete: true });
     } else if (tab === 'favorites') {
       content.innerHTML = '<div class="track-list" id="libraryTracks"></div>';
       renderSortRow(content);
       const favs = await DB.getFavorites();
-      const tracks = applySort(favs.map(f => findTrack(f.id)).filter(Boolean));
+      const tracks = searchFilter(applySort(favs.map(f => findTrack(f.id)).filter(Boolean)), librarySearchQuery);
+      if (tracks.length) {
+        const sb = document.createElement('button');
+        sb.className = 'shuffle-section-btn';
+        sb.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg> Lire en aléatoire';
+        sb.style.marginBottom = '12px';
+        sb.addEventListener('click', () => shufflePlay(tracks));
+        content.insertBefore(sb, $('#libraryTracks'));
+      }
       const c = $('#libraryTracks');
-      if (!tracks.length) c.innerHTML = '<p class="empty-state">Aucun favori.</p>';
+      if (!tracks.length) c.innerHTML = `<p class="empty-state">${librarySearchQuery ? 'Aucun résultat.' : 'Aucun favori.'}</p>`;
       else renderTrackList(c, tracks, { showDelete: true });
     } else if (tab === 'playlists') {
       if (currentPlaylistView) await renderPlaylistDetail(currentPlaylistView);
@@ -583,11 +771,14 @@
       const tracks = pl.trackIds.map(id => findTrack(id)).filter(Boolean);
       const total = tracks.reduce((s,t) => s + (t.duration||0), 0);
       const coverSrc = pl.coverImage ? sanitizeURL(pl.coverImage) || '' : '';
-      html += `<div class="playlist-card" style="background:${esc(pl.coverColor)}" data-playlist-id="${esc(pl.id)}">
+      const hasCover = !!coverSrc;
+      html += `<div class="playlist-card${hasCover ? ' has-cover' : ''}" style="background:${esc(pl.coverColor)}" data-playlist-id="${esc(pl.id)}">
         <button class="playlist-card-delete" data-pl-delete="${esc(pl.id)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-        ${coverSrc ? `<img class="playlist-card-cover-img" src="${esc(coverSrc)}" alt="">` : ''}
-        <div class="playlist-card-name">${esc(pl.name)}</div>
-        <div class="playlist-card-count">${pl.trackIds.length} morceau${pl.trackIds.length!==1?'x':''} · ${formatTotalDuration(total)}</div>
+        ${hasCover ? `<img class="playlist-card-cover-img" src="${esc(coverSrc)}" alt="">` : ''}
+        <div class="playlist-card-info">
+          <div class="playlist-card-name">${esc(pl.name)}</div>
+          <div class="playlist-card-count">${pl.trackIds.length} morceau${pl.trackIds.length!==1?'x':''} · ${formatTotalDuration(total)}</div>
+        </div>
       </div>`;
     });
     html += '</div><div style="text-align:center;margin-top:20px"><button class="import-btn" id="createPlaylistFromLib">+ Nouvelle playlist</button></div>';
@@ -640,19 +831,29 @@
           </h3>
           <p>${tracks.length} morceau${tracks.length!==1?'x':''} · ${formatTotalDuration(totalSec)}</p>
           <div class="playlist-detail-actions">
+            <button class="playlist-action-btn" id="playlistShuffleBtn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg> Aléatoire
+            </button>
             <button class="playlist-action-btn" id="playlistAddTracksBtn">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Ajouter des morceaux
             </button>
           </div>
         </div>
       </div>
+      <div id="playlistSortZone"></div>
       <div class="track-list" id="playlistTracks"></div>`;
 
     // Injection sécurisée du nom via textContent
     $('#playlistNameSpan').textContent = pl.name;
 
-    if (!tracks.length) $('#playlistTracks').innerHTML = '<p class="empty-state">Aucun morceau. Clique sur "Ajouter des morceaux".</p>';
-    else renderTrackList($('#playlistTracks'), tracks, { playlistId: plId, onRemoveFromPlaylist: () => renderPlaylistDetail(plId) });
+    const plTracksContainer = $('#playlistTracks');
+    if (!tracks.length) {
+      plTracksContainer.innerHTML = '<p class="empty-state">Aucun morceau. Clique sur "Ajouter des morceaux".</p>';
+    } else {
+      const sorted = applySort(tracks, playlistSort);
+      renderTrackList(plTracksContainer, sorted, { playlistId: plId, onRemoveFromPlaylist: () => renderPlaylistDetail(plId) });
+      renderSortRow($('#playlistSortZone'), playlistSort, () => renderPlaylistDetail(plId));
+    }
     $('#playlistBack').addEventListener('click', () => { currentPlaylistView = null; refreshLibraryView(); });
     $('#playlistRenameBtn').addEventListener('click', async () => {
       const raw = prompt('Nouveau nom:', pl.name);
@@ -662,6 +863,7 @@
       showToast('Playlist renommée'); renderPlaylistDetail(plId);
     });
     $('#playlistCoverBtn').addEventListener('click', () => { playlistCoverInput.dataset.playlistId = plId; playlistCoverInput.click(); });
+    $('#playlistShuffleBtn').addEventListener('click', () => shufflePlay(tracks));
     $('#playlistAddTracksBtn').addEventListener('click', () => openPlaylistSearchModal(plId));
   }
 
@@ -743,13 +945,7 @@
   closePlaylistSearchModal.addEventListener('click', () => { playlistSearchModal.hidden = true; });
   playlistSearchModal.addEventListener('click', (e) => { if (e.target === playlistSearchModal) playlistSearchModal.hidden = true; });
 
-  async function refreshImportView() {
-    const section = $('#importedSection');
-    const container = $('#importedTracks');
-    if (!userTracks.length) { section.hidden = true; return; }
-    section.hidden = false;
-    renderTrackList(container, userTracks, { showDelete: true });
-  }
+  function refreshImportView() { /* section "Mes fichiers importés" supprimée */ }
 
   function refreshAllViews() {
     refreshHomeView();
@@ -768,6 +964,125 @@
     });
   });
 
+  // ===== Now Playing Screen =====
+  const nowPlayingScreen = $('#nowPlayingScreen');
+  const nowPlayingClose  = $('#nowPlayingClose');
+  const nowPlayingArtwork= $('#nowPlayingArtwork');
+  const nowPlayingTitle  = $('#nowPlayingTitle');
+  const nowPlayingArtist = $('#nowPlayingArtist');
+  const nowPlayingFav    = $('#nowPlayingFav');
+  const npProgressBar    = $('#npProgressBar');
+  const npProgressFill   = $('#npProgressFill');
+  const npCurrentTime    = $('#npCurrentTime');
+  const npTotalTime      = $('#npTotalTime');
+  const npBtnShuffle     = $('#npBtnShuffle');
+  const npBtnPrev        = $('#npBtnPrev');
+  const npBtnSkipBack    = $('#npBtnSkipBack');
+  const npBtnPlay        = $('#npBtnPlay');
+  const npBtnSkipFwd     = $('#npBtnSkipFwd');
+  const npBtnNext        = $('#npBtnNext');
+  const npBtnRepeat      = $('#npBtnRepeat');
+
+  function openNowPlaying() {
+    nowPlayingScreen.hidden = false;
+    document.body.classList.add('np-open');
+    // Sync current state into NP screen
+    const track = Player.getCurrentTrack();
+    if (track) {
+      nowPlayingTitle.textContent  = track.title;
+      nowPlayingArtist.textContent = track.artist;
+      const artImg = document.createElement('img');
+      artImg.src = sanitizeURL(generateArtwork(track)) || generateArtwork(track);
+      artImg.alt = '';
+      nowPlayingArtwork.innerHTML = '';
+      nowPlayingArtwork.appendChild(artImg);
+      DB.isFavorite(track.id).then(isFav => {
+        nowPlayingFav.classList.toggle('active', isFav);
+        nowPlayingFav.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
+      });
+    }
+    npBtnPlay.classList.toggle('is-playing', Player.getIsPlaying());
+    npBtnShuffle.classList.toggle('active', shuffleActive);
+    updateRepeatButtons(repeatMode);
+  }
+  function closeNowPlaying() {
+    nowPlayingScreen.hidden = true;
+    document.body.classList.remove('np-open');
+  }
+  nowPlayingClose.addEventListener('click', closeNowPlaying);
+
+  // Swipe-up on player bar → open Now Playing
+  const playerBar = $('#playerBar');
+  let swipeStartY = null;
+  playerBar.addEventListener('touchstart', (e) => {
+    swipeStartY = e.touches[0].clientY;
+  }, { passive: true });
+  playerBar.addEventListener('touchend', (e) => {
+    if (swipeStartY === null) return;
+    const dy = swipeStartY - e.changedTouches[0].clientY;
+    if (dy > 35) openNowPlaying();
+    swipeStartY = null;
+  }, { passive: true });
+
+  // Swipe-down on NP screen → close
+  let npSwipeY = null;
+  nowPlayingScreen.addEventListener('touchstart', (e) => {
+    if (e.target.closest('.np-progress-bar,.now-playing-controls')) return;
+    npSwipeY = e.touches[0].clientY;
+  }, { passive: true });
+  nowPlayingScreen.addEventListener('touchend', (e) => {
+    if (npSwipeY === null) return;
+    const dy = e.changedTouches[0].clientY - npSwipeY;
+    if (dy > 60) closeNowPlaying();
+    npSwipeY = null;
+  }, { passive: true });
+
+  // Click on track info in mini-player → open Now Playing
+  const playerTrackInfoArea = $('.player-track-info');
+  playerTrackInfoArea.addEventListener('click', (e) => {
+    if (e.target.closest('.favorite-btn')) return;
+    openNowPlaying();
+  });
+
+  // NP screen controls mirror main player
+  npBtnPlay.addEventListener('click', () => btnPlay.click());
+  npBtnPrev.addEventListener('click', () => btnPrev.click());
+  npBtnNext.addEventListener('click', () => btnNext.click());
+  npBtnShuffle.addEventListener('click', () => btnShuffle.click());
+  npBtnRepeat.addEventListener('click', () => btnRepeat.click());
+  npBtnSkipBack.addEventListener('click', () => Player.seekRelative(-10));
+  npBtnSkipFwd.addEventListener('click',  () => Player.seekRelative(10));
+
+  // NP screen favorite button
+  nowPlayingFav.addEventListener('click', async () => {
+    const track = Player.getCurrentTrack(); if (!track) return;
+    const isFav = await DB.toggleFavorite(track.id);
+    nowPlayingFav.classList.toggle('active', isFav);
+    nowPlayingFav.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
+    playerFavorite.classList.toggle('active', isFav);
+    playerFavorite.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
+    showToast(isFav ? 'Ajouté aux favoris' : 'Retiré des favoris');
+  });
+
+  // NP progress bar seek
+  let npDragging = false;
+  function npSeekFrac(e) {
+    const r = npProgressBar.getBoundingClientRect();
+    const x = e.touches ? e.touches[0].clientX : e.clientX;
+    const f = Math.max(0, Math.min(1, (x - r.left) / r.width));
+    npProgressFill.style.width = `${f * 100}%`;
+    return f;
+  }
+  npProgressBar.addEventListener('mousedown', (e) => {
+    npDragging = true; npProgressBar.classList.add('dragging'); Player.seek(npSeekFrac(e));
+    const mv = (ev) => Player.seek(npSeekFrac(ev));
+    const up = () => { npDragging = false; npProgressBar.classList.remove('dragging'); document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); };
+    document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
+  });
+  npProgressBar.addEventListener('touchstart', (e) => { e.preventDefault(); npDragging = true; npProgressBar.classList.add('dragging'); Player.seek(npSeekFrac(e)); }, { passive: false });
+  npProgressBar.addEventListener('touchmove',  (e) => { e.preventDefault(); if (npDragging) Player.seek(npSeekFrac(e)); }, { passive: false });
+  npProgressBar.addEventListener('touchend',   () => { npDragging = false; npProgressBar.classList.remove('dragging'); });
+
   // ===== Player Events =====
   Player.on('trackchange', async (track) => {
     // textContent pour title et artist : sûr sans esc()
@@ -781,9 +1096,21 @@
     playerArtwork.innerHTML = '';
     playerArtwork.appendChild(img);
 
+    // Sync NP screen if open
+    nowPlayingTitle.textContent  = track.title;
+    nowPlayingArtist.textContent = track.artist;
+    const npImg = document.createElement('img');
+    npImg.src = sanitizeURL(generateArtwork(track)) || generateArtwork(track);
+    npImg.alt = '';
+    nowPlayingArtwork.innerHTML = '';
+    nowPlayingArtwork.appendChild(npImg);
+
     const isFav = await DB.isFavorite(track.id);
     playerFavorite.classList.toggle('active', isFav);
     playerFavorite.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
+    nowPlayingFav.classList.toggle('active', isFav);
+    nowPlayingFav.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
+
     $$('.track-item').forEach(el => {
       const isThis = el.dataset.trackId === track.id;
       el.classList.toggle('playing', isThis);
@@ -797,13 +1124,24 @@
       navigator.mediaSession.metadata = new MediaMetadata({ title: track.title, artist: track.artist, album: track.album||'' });
     }
   });
-  Player.on('statechange', ({ playing }) => { btnPlay.classList.toggle('is-playing', playing); });
+  Player.on('statechange', ({ playing }) => {
+    btnPlay.classList.toggle('is-playing', playing);
+    npBtnPlay.classList.toggle('is-playing', playing);
+  });
   let isDragging = false;
   Player.on('timeupdate', ({ currentTime, duration }) => {
-    if (isDragging || !duration) return;
-    progressFill.style.width = `${(currentTime/duration)*100}%`;
-    currentTimeEl.textContent = formatDuration(currentTime);
-    totalTimeEl.textContent = formatDuration(duration);
+    if (!duration) return;
+    const pct = `${(currentTime / duration) * 100}%`;
+    if (!isDragging) {
+      progressFill.style.width = pct;
+      currentTimeEl.textContent = formatDuration(currentTime);
+      totalTimeEl.textContent   = formatDuration(duration);
+    }
+    if (!npDragging) {
+      npProgressFill.style.width = pct;
+      npCurrentTime.textContent  = formatDuration(currentTime);
+      npTotalTime.textContent    = formatDuration(duration);
+    }
   });
   Player.on('error', ({ message }) => showToast(message));
 
@@ -840,15 +1178,27 @@
     if (ytMode) { if (ytCurrentIndex < ytSearchResults.length - 1) playYouTubeVideo(ytCurrentIndex + 1); return; }
     Player.next();
   });
+  btnSkipBack.addEventListener('click', () => Player.seekRelative(-10));
+  btnSkipFwd.addEventListener('click',  () => Player.seekRelative(10));
   btnShuffle.addEventListener('click', () => {
-    const a = Player.toggleShuffle(); btnShuffle.classList.toggle('active', a);
-    showToast(a ? 'Lecture aléatoire activée' : 'Lecture aléatoire désactivée');
+    shuffleActive = Player.toggleShuffle();
+    btnShuffle.classList.toggle('active', shuffleActive);
+    npBtnShuffle.classList.toggle('active', shuffleActive);
+    showToast(shuffleActive ? 'Lecture aléatoire activée' : 'Lecture aléatoire désactivée');
   });
-  btnRepeat.addEventListener('click', () => {
-    const mode = Player.toggleRepeat(); btnRepeat.classList.toggle('active', mode !== 'none');
+  function updateRepeatButtons(mode) {
+    const active = mode !== 'none';
+    btnRepeat.classList.toggle('active', active);
+    npBtnRepeat.classList.toggle('active', active);
     const base = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>`;
-    btnRepeat.innerHTML = mode==='one' ? base+`<text x="12" y="16" font-size="8" fill="currentColor" text-anchor="middle" font-weight="bold">1</text></svg>` : base+`</svg>`;
-    showToast({ none:'Répétition désactivée', all:'Répéter tout', one:'Répéter un seul' }[mode]);
+    const svg = mode === 'one' ? base + `<text x="12" y="16" font-size="8" fill="currentColor" text-anchor="middle" font-weight="bold">1</text></svg>` : base + `</svg>`;
+    btnRepeat.innerHTML = svg;
+    npBtnRepeat.innerHTML = svg;
+  }
+  btnRepeat.addEventListener('click', () => {
+    repeatMode = Player.toggleRepeat();
+    updateRepeatButtons(repeatMode);
+    showToast({ none:'Répétition désactivée', all:'Répéter tout', one:'Répéter un seul' }[repeatMode]);
   });
 
   // Progress
@@ -899,10 +1249,12 @@
   });
 
   if ('mediaSession' in navigator) {
-    navigator.mediaSession.setActionHandler('play',          () => Player.togglePlay());
-    navigator.mediaSession.setActionHandler('pause',         () => Player.pause());
-    navigator.mediaSession.setActionHandler('previoustrack', () => btnPrev.click());
-    navigator.mediaSession.setActionHandler('nexttrack',     () => btnNext.click());
+    navigator.mediaSession.setActionHandler('play',           () => Player.togglePlay());
+    navigator.mediaSession.setActionHandler('pause',          () => Player.pause());
+    navigator.mediaSession.setActionHandler('previoustrack',  () => btnPrev.click());
+    navigator.mediaSession.setActionHandler('nexttrack',      () => btnNext.click());
+    navigator.mediaSession.setActionHandler('seekbackward',   (d) => Player.seekRelative(-(d && d.seekOffset ? d.seekOffset : 10)));
+    navigator.mediaSession.setActionHandler('seekforward',    (d) => Player.seekRelative(d && d.seekOffset ? d.seekOffset : 10));
   }
 
   document.addEventListener('keydown', (e) => {
@@ -955,18 +1307,17 @@
         fail++; continue;
       }
 
-      const { title, artist } = parseName(file.name);
+      const { title, artist, album, genre, releaseYear, coverArt } = await extractAllMetadata(file);
       const { valid, duration } = await validateAudio(file);
       if (!valid) { fail++; continue; }
-      const coverArt = await extractCoverArt(file);
 
       // Valider que la coverArt extraite est bien une image
       const safeCoverArt = coverArt?.startsWith('data:image/') ? coverArt : null;
 
       const meta = {
         id: 'user-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),
-        title, artist, album:'', duration:Math.round(duration),
-        genre:'', color:randColor(), userImported:true,
+        title, artist, album, duration:Math.round(duration),
+        genre, releaseYear, color:randColor(), userImported:true,
         fileName:file.name, importedAt:Date.now(), coverArt:safeCoverArt,
       };
       await DB.saveUserTrack(meta, file);
@@ -981,6 +1332,229 @@
   }
   fileInput.addEventListener('change', () => { if(fileInput.files.length) { importFiles(fileInput.files); fileInput.value=''; } });
   importDropzone.addEventListener('click', (e) => { if(!e.target.closest('.import-btn') && e.target.tagName!=='LABEL') fileInput.click(); });
+
+  // ===== Import YouTube (cobalt → Piped → Invidious) =====
+  const ytImportInput    = $('#ytImportInput');
+  const ytImportBtn      = $('#ytImportBtn');
+  const ytPreviewCard    = $('#ytPreviewCard');
+  const ytPreviewThumb   = $('#ytPreviewThumb');
+  const ytPreviewTitleEl = $('#ytPreviewTitle');
+  const ytPreviewMetaEl  = $('#ytPreviewMeta');
+  const ytPreviewSaveBtn = $('#ytPreviewSaveBtn');
+  const ytPreviewDlBtn   = $('#ytPreviewDlBtn');
+  const ytImportProgress = $('#ytImportProgress');
+  const ytImportFill     = $('#ytImportFill');
+  const ytImportText     = $('#ytImportText');
+
+  let _ytPreviewData = null;
+
+  function _fmtDur(s) {
+    if (!s || s <= 0) return '';
+    return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+  }
+
+  function extractYouTubeVideoId(input) {
+    input = (input || '').trim();
+    if (!input) return null;
+    if (/^[a-zA-Z0-9_-]{11}$/.test(input)) return input;
+    try {
+      const u = new URL(input);
+      if (u.hostname.includes('youtube.com')) {
+        if (u.pathname.startsWith('/shorts/')) return u.pathname.split('/')[2]?.slice(0, 11) || null;
+        return u.searchParams.get('v');
+      }
+      if (u.hostname === 'youtu.be') return u.pathname.slice(1).split('?')[0].slice(0, 11) || null;
+    } catch {}
+    const m = input.match(/(?:v=|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})/);
+    return m ? m[1] : null;
+  }
+
+
+  // Étape 1 : analyser l'URL → afficher la preview
+  async function analyzeYouTubeUrl() {
+    const videoId = extractYouTubeVideoId(ytImportInput.value);
+    if (!videoId) { showToast('URL YouTube invalide'); return; }
+    _ytPreviewData = null;
+    ytImportBtn.disabled = true;
+    ytPreviewCard.hidden = false;
+    ytPreviewThumb.src = `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/hqdefault.jpg`;
+    ytPreviewTitleEl.textContent = 'Analyse...';
+    ytPreviewMetaEl.textContent = '';
+    ytPreviewSaveBtn.hidden = true;
+    ytPreviewDlBtn.hidden = true;
+    ytPreviewSaveBtn.className = 'yt-preview-save-btn';
+    ytPreviewDlBtn.className = 'yt-preview-dl-btn';
+    ytImportProgress.hidden = true;
+    let rawTitle = '', uploader = '', duration = 0, thumbnailUrl = '';
+    for (const inst of PIPED_INSTANCES) {
+      try {
+        const r = await fetchWithTimeout(`${inst}/streams/${videoId}`, { cache:'no-cache' }, 10000);
+        if (!r.ok) continue;
+        const d = await r.json();
+        if (d.error) continue;
+        rawTitle = d.title || ''; uploader = d.uploader || '';
+        duration = d.duration || 0; thumbnailUrl = sanitizeURL(d.thumbnailUrl || '') || '';
+        break;
+      } catch {}
+    }
+    // Fallback Invidious pour les métadonnées si Piped a échoué
+    if (!rawTitle) {
+      const invs = await getInvidiousInstances();
+      for (const inst of invs) {
+        try {
+          const r = await fetchWithTimeout(`${inst}/api/v1/videos/${videoId}?fields=title,author,lengthSeconds,videoThumbnails`, {}, 10000);
+          if (!r.ok) continue;
+          const d = await r.json();
+          if (!d.title) continue;
+          rawTitle = d.title || ''; uploader = d.author || '';
+          duration = d.lengthSeconds || 0;
+          const thumb = d.videoThumbnails?.find(t => t.quality === 'high') || d.videoThumbnails?.[0];
+          thumbnailUrl = sanitizeURL(thumb?.url || '') || '';
+          break;
+        } catch {}
+      }
+    }
+    ytImportBtn.disabled = false;
+    let displayTitle = rawTitle || 'Titre inconnu', displayArtist = uploader || '';
+    const dm = rawTitle.match(/^(.+?)\s*[-–—]\s*(.+)$/);
+    if (dm) { displayArtist = dm[1].trim(); displayTitle = dm[2].trim(); }
+    ytPreviewTitleEl.textContent = displayTitle;
+    ytPreviewMetaEl.textContent = displayArtist + (_fmtDur(duration) ? ' · ' + _fmtDur(duration) : '');
+    const alreadySaved = userTracks.some(t => t.youtubeId === videoId);
+    ytPreviewSaveBtn.innerHTML = alreadySaved
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg> Déjà dans la bibliothèque'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg> Sauvegarder dans la bibliothèque';
+    ytPreviewSaveBtn.disabled = alreadySaved;
+    if (alreadySaved) ytPreviewSaveBtn.classList.add('saved');
+    ytPreviewDlBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Télécharger sur l\'appareil';
+    ytPreviewDlBtn.disabled = false;
+    ytPreviewSaveBtn.hidden = false;
+    ytPreviewDlBtn.hidden = false;
+    _ytPreviewData = { videoId, title: displayTitle, artist: displayArtist, duration, thumbnailUrl };
+  }
+
+  // Étape 2a : sauvegarder dans la bibliothèque (cobalt → Piped → Invidious)
+  async function saveFromYouTube() {
+    if (!_ytPreviewData) return;
+    const { videoId, title, artist, duration, thumbnailUrl } = _ytPreviewData;
+    ytPreviewSaveBtn.disabled = true; ytPreviewDlBtn.disabled = true;
+    ytImportProgress.hidden = false;
+    ytImportFill.style.width = '5%'; ytImportText.textContent = 'Connexion...';
+    try {
+      let blob, mimeType, pipedTitle, pipedUploader, pipedDuration;
+      // 1. cobalt.tools (yt-dlp)
+      try {
+        ytImportText.textContent = 'cobalt.tools (yt-dlp)...';
+        ytImportFill.style.width = '15%';
+        ({ blob, mimeType } = await downloadFromCobalt(videoId));
+        pipedTitle = title; pipedUploader = artist; pipedDuration = duration;
+      } catch {
+        // 2. Piped
+        try {
+          ytImportFill.style.width = '25%'; ytImportText.textContent = 'Piped...';
+          const res = await downloadFromPiped(videoId, (c,t) => {
+            ytImportFill.style.width = `${25 + Math.round(c/t*35)}%`;
+            ytImportText.textContent = `Piped ${c}/${t}...`;
+          });
+          ({ blob, mimeType } = res);
+          pipedTitle = res.pipedTitle; pipedUploader = res.pipedUploader; pipedDuration = res.pipedDuration;
+        } catch {
+          // 3. Invidious
+          ytImportFill.style.width = '65%'; ytImportText.textContent = 'Invidious...';
+          const res = await downloadFromInvidious(videoId, (c,t) => {
+            ytImportFill.style.width = `${65 + Math.round(c/t*20)}%`;
+            ytImportText.textContent = `Invidious ${c}/${t}...`;
+          });
+          ({ blob, mimeType } = res);
+          pipedTitle = res.pipedTitle; pipedUploader = res.pipedUploader; pipedDuration = res.pipedDuration;
+        }
+      }
+      ytImportFill.style.width = '88%'; ytImportText.textContent = 'Validation...';
+      const { duration: audioDuration } = await validateAudio(blob);
+      const mime = (mimeType || '').split(';')[0];
+      const ext = mime.includes('opus') ? 'opus' : mime.includes('mp4') ? 'm4a' : mime.includes('webm') ? 'webm' : 'mp3';
+      const finalTitle = title || pipedTitle || 'Titre inconnu';
+      const finalArtist = artist || pipedUploader || 'Artiste inconnu';
+      let coverArt = null;
+      const thumb = thumbnailUrl || '';
+      if (thumb) {
+        try {
+          const tr = await fetchWithTimeout(thumb, {}, 10000);
+          if (tr.ok && (tr.headers.get('content-type')||'').startsWith('image/')) {
+            const tb = await tr.blob();
+            coverArt = await new Promise(r => { const rd = new FileReader(); rd.onload=()=>r(rd.result); rd.onerror=()=>r(null); rd.readAsDataURL(tb); });
+            if (coverArt && !coverArt.startsWith('data:image/')) coverArt = null;
+          }
+        } catch {}
+      }
+      const meta = { id:'yt-'+videoId+'-'+Date.now(), title:finalTitle, artist:finalArtist, album:'', duration:Math.round(audioDuration||pipedDuration||duration||0), genre:'', color:randColor(), userImported:true, fileName:`${videoId}.${ext}`, importedAt:Date.now(), coverArt, youtubeId:videoId };
+      await DB.saveUserTrack(meta, blob); userTracks.push(meta);
+      ytImportFill.style.width = '100%'; ytImportText.textContent = `"${meta.title}" ajouté à la bibliothèque`;
+      ytPreviewSaveBtn.classList.add('saved');
+      ytPreviewSaveBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg> Sauvegardé';
+      ytImportInput.value = ''; _ytPreviewData = null;
+      showToast(`"${meta.title}" sauvegardé`); refreshAllViews();
+      setTimeout(() => { ytImportProgress.hidden = true; ytImportFill.style.width = '0%'; }, 3000);
+    } catch (err) {
+      ytImportFill.style.width = '0%'; ytImportText.textContent = 'Erreur : ' + (err.message||'Échec').slice(0,80);
+      ytPreviewSaveBtn.disabled = false;
+      showToast('Erreur : ' + (err.message||'Échec').slice(0,60));
+    } finally {
+      ytPreviewDlBtn.disabled = false;
+    }
+  }
+
+  // Étape 2b : télécharger directement sur l'appareil (cobalt → Piped → Invidious)
+  async function downloadToDevice() {
+    if (!_ytPreviewData) return;
+    const { videoId, title } = _ytPreviewData;
+    ytPreviewDlBtn.disabled = true; ytPreviewSaveBtn.disabled = true;
+    ytImportProgress.hidden = false;
+    ytImportFill.style.width = '10%'; ytImportText.textContent = 'Téléchargement...';
+    try {
+      let blob, mimeType;
+      try {
+        ytImportText.textContent = 'cobalt.tools...'; ytImportFill.style.width = '20%';
+        ({ blob, mimeType } = await downloadFromCobalt(videoId));
+      } catch {
+        try {
+          ytImportText.textContent = 'Piped...'; ytImportFill.style.width = '40%';
+          const res = await downloadFromPiped(videoId);
+          blob = res.blob; mimeType = res.mimeType;
+        } catch {
+          ytImportText.textContent = 'Invidious...'; ytImportFill.style.width = '65%';
+          const res = await downloadFromInvidious(videoId);
+          blob = res.blob; mimeType = res.mimeType;
+        }
+      }
+      ytImportFill.style.width = '95%'; ytImportText.textContent = 'Préparation du fichier...';
+      const mime = (mimeType||'').split(';')[0];
+      const ext = mime.includes('opus') ? 'opus' : mime.includes('mp4') ? 'm4a' : mime.includes('webm') ? 'webm' : 'mp3';
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl; a.download = `${title}.${ext}`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+      ytImportFill.style.width = '100%'; ytImportText.textContent = 'Téléchargement lancé !';
+      ytPreviewDlBtn.classList.add('done');
+      ytPreviewDlBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg> Téléchargé';
+      showToast('Téléchargement lancé');
+      setTimeout(() => { ytImportProgress.hidden = true; ytImportFill.style.width = '0%'; }, 3000);
+    } catch (err) {
+      ytImportFill.style.width = '0%'; ytImportText.textContent = 'Erreur : ' + (err.message||'Échec').slice(0,80);
+      ytPreviewDlBtn.disabled = false;
+      showToast('Erreur : ' + (err.message||'Échec').slice(0,60));
+    } finally {
+      ytPreviewSaveBtn.disabled = false;
+    }
+  }
+
+  ytImportBtn.addEventListener('click', analyzeYouTubeUrl);
+  ytImportInput.addEventListener('keydown', (e) => { if (e.key==='Enter') { e.preventDefault(); analyzeYouTubeUrl(); } });
+  ytImportInput.addEventListener('input', () => { if (!ytImportInput.value.trim()) { ytPreviewCard.hidden = true; _ytPreviewData = null; } });
+  ytPreviewSaveBtn.addEventListener('click', saveFromYouTube);
+  ytPreviewDlBtn.addEventListener('click', downloadToDevice);
+
   importDropzone.addEventListener('dragover', (e) => { e.preventDefault(); importDropzone.classList.add('dragover'); });
   importDropzone.addEventListener('dragleave', () => importDropzone.classList.remove('dragover'));
   importDropzone.addEventListener('drop', (e) => { e.preventDefault(); importDropzone.classList.remove('dragover'); if(e.dataTransfer.files.length) importFiles(e.dataTransfer.files); });
@@ -1048,24 +1622,30 @@
     }
   });
 
+  // Instances confirmées comme proxifiant leurs streams (URLs sur leur propre domaine).
+  // Les instances qui renvoient des URLs googlevideo.com directes sont inutilisables depuis JS (CORS).
+  // Elles sont gardées en fallback mais on essaie les proxifiantes d'abord.
   const PIPED_INSTANCES = [
+    // Liste officielle TeamPiped (https://github.com/TeamPiped/Piped/wiki/Instances)
+    // Les instances confirmées comme proxifiantes passent en tête de liste.
+    'https://api.piped.private.coffee',
     'https://pipedapi.kavin.rocks',
-    'https://api.piped.projectsegfau.lt',
     'https://pipedapi.adminforge.de',
-    'https://pipedapi.tokhmi.xyz',
-    'https://piped-api.garudalinux.org',
-    'https://api.piped.yt',
-    'https://pipedapi.syncpundit.io',
-    'https://pipedapi-libre.kavin.rocks',
     'https://piped-api.privacy.com.de',
+    'https://api.piped.yt',
+    'https://pipedapi.reallyaweso.me',
+    'https://pipedapi.nosebs.ru',
+    'https://pipedapi.darkness.services',
+    'https://pipedapi.orangenet.cc',
     'https://pipedapi.leptons.xyz',
     'https://pipedapi.drgns.space',
     'https://pipedapi.owo.si',
     'https://piped-api.codespace.cz',
-    'https://api.piped.private.coffee',
-    'https://pipedapi.darkness.services',
     'https://pipedapi.ducks.party',
   ];
+  // Instances qui ont prouvé (dans cette session) qu'elles proxifient leurs streams.
+  // Elles passent en tête de liste lors des appels suivants pour éviter de tester les autres.
+  const _pipedProxyConfirmed = new Set();
   const INVIDIOUS_FALLBACK = [
     'https://yewtu.be','https://invidious.nerdvpn.de','https://invidious.privacydev.net',
     'https://inv.tux.pizza','https://invidious.flokinet.to','https://invidious.fdn.fr',
@@ -1117,29 +1697,58 @@
         if (e.name !== 'AbortError') console.error('Piped search error:', inst);
       }
     }
+    // Fallback Invidious si tous les serveurs Piped sont indisponibles
+    const invs = await getInvidiousInstances();
+    for (const inst of invs) {
+      try {
+        const r = await fetchWithTimeout(`${inst}/api/v1/search?q=${encodeURIComponent(safeQ)}&type=video`, {}, 8000);
+        if (!r.ok) continue;
+        const data = await r.json();
+        if (!Array.isArray(data) || !data.length) continue;
+        // Transformer le format Invidious vers le format Piped attendu par renderYTResults
+        const items = data.slice(0, 12).filter(v => v.videoId && v.title).map(v => ({
+          type: 'stream',
+          url: `/watch?v=${v.videoId}`,
+          title: v.title || '',
+          uploaderName: v.author || '',
+          thumbnail: (v.videoThumbnails?.find(t => t.quality === 'high') || v.videoThumbnails?.[0])?.url || '',
+          duration: v.lengthSeconds || 0,
+        }));
+        if (items.length) return items;
+      } catch(e) {
+        if (e.name !== 'AbortError') console.error('Invidious search error:', inst);
+      }
+    }
     throw new Error('Aucun serveur disponible');
   }
 
   async function downloadYouTubeAsBlobUrl(videoId) {
-    for (const inst of PIPED_INSTANCES) {
+    const ordered = [
+      ...PIPED_INSTANCES.filter(i => _pipedProxyConfirmed.has(i)),
+      ...PIPED_INSTANCES.filter(i => !_pipedProxyConfirmed.has(i)),
+    ];
+    for (const inst of ordered) {
       try {
-        const r = await fetchWithTimeout(`${inst}/streams/${videoId}`, {}, 8000);
+        const r = await fetchWithTimeout(`${inst}/streams/${videoId}`, { cache:'no-cache' }, 8000);
         if (!r.ok) continue;
         const data = await r.json();
         if (!data.audioStreams?.length) continue;
         const sorted = data.audioStreams.filter(s=>s.url&&s.mimeType).sort((a,b)=>(b.bitrate||0)-(a.bitrate||0));
+        // Vérifier qu'au moins un stream est proxifié (URL non-Google) — sinon CORS bloqué
+        const hasProxied = sorted.some(s => { const u = sanitizeURL(s.url); return u && !u.includes('googlevideo.com'); });
+        if (!hasProxied) continue;
         for (const stream of sorted.slice(0,3)) {
           try {
-            // ⚠️ SÉCURITÉ : Valider l'URL du stream avant de la fetch
-            const streamUrl = sanitizeURL(stream.url);
-            if (!streamUrl) continue;
-            const ar = await fetchWithTimeout(streamUrl, {}, 30000);
-            if (!ar.ok) continue;
-            const contentType = ar.headers.get('content-type') || '';
-            // Valider que c'est bien de l'audio
-            if (!contentType.startsWith('audio/') && !contentType.startsWith('video/') && !contentType.includes('octet-stream')) continue;
-            const blob = await ar.blob();
-            if (blob.size > 5000) return URL.createObjectURL(blob);
+            const rawUrl = sanitizeURL(stream.url);
+            if (!rawUrl || rawUrl.includes('googlevideo.com')) continue;
+            try {
+              const ar = await fetchWithTimeout(rawUrl, {}, 120000);
+              if (!ar.ok) continue;
+              const contentType = ar.headers.get('content-type') || '';
+              if (contentType && !contentType.startsWith('audio/') && !contentType.startsWith('video/') && !contentType.includes('octet-stream')) continue;
+              const blob = await ar.blob();
+              if (blob.size > 5000) { _pipedProxyConfirmed.add(inst); return URL.createObjectURL(blob); }
+            } catch {}
           } catch {}
         }
       } catch(e) {
@@ -1156,7 +1765,7 @@
         for (const fmt of fmts.slice(0,2)) {
           try {
             const url = `${inst}/latest_version?id=${videoId}&itag=${encodeURIComponent(fmt.itag)}&local=true`;
-            const ar = await fetchWithTimeout(url, {}, 30000);
+            const ar = await fetchWithTimeout(url, {}, 120000);
             if (!ar.ok) continue;
             const blob = await ar.blob();
             if (blob.size > 5000) return URL.createObjectURL(blob);
@@ -1298,7 +1907,9 @@
       artwork: ytCurrentVideo.thumbnail ? [{ src:ytCurrentVideo.thumbnail, sizes:'320x180', type:'image/jpeg' }] : [],
     });
     navigator.mediaSession.setActionHandler('previoustrack', () => btnPrev.click());
-    navigator.mediaSession.setActionHandler('nexttrack', () => btnNext.click());
+    navigator.mediaSession.setActionHandler('nexttrack',     () => btnNext.click());
+    navigator.mediaSession.setActionHandler('seekbackward',  (d) => Player.seekRelative(-(d && d.seekOffset ? d.seekOffset : 10)));
+    navigator.mediaSession.setActionHandler('seekforward',   (d) => Player.seekRelative(d && d.seekOffset ? d.seekOffset : 10));
   }
 
   function exitYTMode() {
@@ -1373,11 +1984,19 @@
     try {
       showToast('Téléchargement en cours...');
       let res;
+      // 1. cobalt.tools (yt-dlp) — le plus fiable
       try {
-        res = await downloadFromPiped(videoId, (c,t)=>{if(c>1)showToast(`Piped ${c}/${t}...`);});
+        const { blob, mimeType } = await downloadFromCobalt(videoId);
+        res = { blob, mimeType, pipedTitle: item.title||'', pipedUploader: item.uploaderName||'', pipedDuration: 0 };
       } catch {
-        showToast('Piped indisponible, essai Invidious...');
-        res = await downloadFromInvidious(videoId, (c,t)=>showToast(`Invidious ${c}/${t}...`));
+        // 2. Piped
+        try {
+          res = await downloadFromPiped(videoId, (c,t)=>{if(c>1)showToast(`Piped ${c}/${t}...`);});
+        } catch {
+          // 3. Invidious
+          showToast('Piped indisponible, essai Invidious...');
+          res = await downloadFromInvidious(videoId, (c,t)=>showToast(`Invidious ${c}/${t}...`));
+        }
       }
       const { blob, mimeType, pipedTitle, pipedUploader, pipedDuration } = res;
       const mime = (mimeType||'').split(';')[0];
@@ -1416,28 +2035,63 @@
     }
   }
 
+  // ===== cobalt.tools (yt-dlp backend) — tentative en premier avant Piped =====
+  async function downloadFromCobalt(videoId) {
+    const ytUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+    // API cobalt v10+ : endpoint racine, nouveaux paramètres downloadMode / audioFormat
+    const r = await fetchWithTimeout('https://api.cobalt.tools/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ url: ytUrl, downloadMode: 'audio', audioFormat: 'best' })
+    }, 15000);
+    if (!r.ok) throw new Error(`cobalt HTTP ${r.status}`);
+    const data = await r.json();
+    if (data.status === 'error') throw new Error(`cobalt: ${data.error?.code || 'erreur'}`);
+    const streamUrl = sanitizeURL(data.url || '');
+    if (!streamUrl) throw new Error('cobalt: pas d\'URL');
+    const ar = await fetchWithTimeout(streamUrl, {}, 120000);
+    if (!ar.ok) throw new Error(`cobalt stream HTTP ${ar.status}`);
+    const blob = await ar.blob();
+    if (!blob || blob.size < 10000) throw new Error('cobalt: fichier trop petit');
+    return { blob, mimeType: ar.headers.get('content-type') || 'audio/mpeg' };
+  }
+
   async function downloadFromPiped(videoId, onProgress) {
-    for (let i=0; i<PIPED_INSTANCES.length; i++) {
-      const inst = PIPED_INSTANCES[i];
+    // Les instances confirmées comme proxifiantes passent en tête (plus rapide en session)
+    const ordered = [
+      ...PIPED_INSTANCES.filter(i => _pipedProxyConfirmed.has(i)),
+      ...PIPED_INSTANCES.filter(i => !_pipedProxyConfirmed.has(i)),
+    ];
+    for (let i=0; i<ordered.length; i++) {
+      const inst = ordered[i];
       try {
-        if(onProgress) onProgress(i+1, PIPED_INSTANCES.length);
-        const r = await fetchWithTimeout(`${inst}/streams/${videoId}`, {}, 12000);
+        if(onProgress) onProgress(i+1, ordered.length);
+        const r = await fetchWithTimeout(`${inst}/streams/${videoId}`, { cache:'no-cache' }, 12000);
         if(!r.ok) continue;
         const data = await r.json();
         if(!data.audioStreams?.length) continue;
         const sorted = data.audioStreams.filter(s=>s.url&&s.mimeType).sort((a,b)=>(b.bitrate||0)-(a.bitrate||0));
         if(!sorted.length) continue;
-        const stream = sorted[0];
-        // ⚠️ SÉCURITÉ : Valider l'URL du stream
-        let audioUrl = sanitizeURL(stream.url);
-        if (!audioUrl) continue;
-        try { const t=await fetchWithTimeout(audioUrl,{method:'HEAD'},8000); if(!t.ok) throw new Error(); }
-        catch { audioUrl=`${inst}/proxy?url=${encodeURIComponent(audioUrl)}`; }
-        const ar = await fetchWithTimeout(audioUrl, {}, 30000); if(!ar.ok) continue;
-        const contentType = ar.headers.get('content-type') || '';
-        if (!contentType.startsWith('audio/') && !contentType.startsWith('video/') && !contentType.includes('octet-stream')) continue;
-        const blob = await ar.blob(); if(!blob||blob.size<10000) continue;
-        return { blob, mimeType:stream.mimeType, pipedTitle:data.title, pipedUploader:data.uploader, pipedDuration:data.duration };
+
+        // Vérifier si au moins un stream est proxifié (URL non-Google) — évite 120s de timeout inutile
+        const hasProxied = sorted.some(s => { const u = sanitizeURL(s.url); return u && !u.includes('googlevideo.com'); });
+        if (!hasProxied) continue;
+
+        for (const stream of sorted.slice(0, 3)) {
+          const rawUrl = sanitizeURL(stream.url);
+          if (!rawUrl || rawUrl.includes('googlevideo.com')) continue;
+
+          try {
+            const ar = await fetchWithTimeout(rawUrl, {}, 120000);
+            if (!ar.ok) continue;
+            const contentType = ar.headers.get('content-type') || '';
+            if (contentType && !contentType.startsWith('audio/') && !contentType.startsWith('video/') && !contentType.includes('octet-stream')) continue;
+            const blob = await ar.blob();
+            if (!blob || blob.size < 10000) continue;
+            _pipedProxyConfirmed.add(inst); // mémoriser pour les prochains appels
+            return { blob, mimeType:stream.mimeType, pipedTitle:data.title, pipedUploader:data.uploader, pipedDuration:data.duration, thumbnailUrl:data.thumbnailUrl||'' };
+          } catch { /* stream suivant */ }
+        }
       } catch(e) {
         if (e.name !== 'AbortError') console.error('Piped download error:', inst);
       }
@@ -1456,10 +2110,15 @@
         const data = await r.json();
         const fmts = (data.adaptiveFormats||[]).filter(f=>f.type?.startsWith('audio/')&&f.itag).sort((a,b)=>(parseInt(b.bitrate)||0)-(parseInt(a.bitrate)||0));
         if(!fmts.length) continue;
-        const url = `${inst}/latest_version?id=${encodeURIComponent(videoId)}&itag=${encodeURIComponent(fmts[0].itag)}&local=true`;
-        const ar = await fetchWithTimeout(url, {}, 35000); if(!ar.ok) continue;
-        const blob = await ar.blob(); if(!blob||blob.size<10000) continue;
-        return { blob, mimeType:fmts[0].type.split(';')[0], pipedTitle:data.title, pipedUploader:data.author, pipedDuration:data.lengthSeconds };
+        // Essayer jusqu'à 3 formats par instance (du meilleur bitrate au plus bas)
+        for (const fmt of fmts.slice(0, 3)) {
+          try {
+            const url = `${inst}/latest_version?id=${encodeURIComponent(videoId)}&itag=${encodeURIComponent(fmt.itag)}&local=true`;
+            const ar = await fetchWithTimeout(url, {}, 120000); if(!ar.ok) continue;
+            const blob = await ar.blob(); if(!blob||blob.size<10000) continue;
+            return { blob, mimeType:fmt.type.split(';')[0], pipedTitle:data.title, pipedUploader:data.author, pipedDuration:data.lengthSeconds };
+          } catch { /* format suivant */ }
+        }
       } catch(e) {
         if (e.name !== 'AbortError') console.error('Invidious download error:', inst);
       }
@@ -1493,12 +2152,46 @@
     catch(e) { /* SW optionnel — échec silencieux */ }
   }
 
+  // ===== Portrait Lock =====
+  // iOS ne supporte pas screen.orientation.lock() — on utilise JS pur.
+  // On cible uniquement les appareils mobiles (plus petite dimension ≤ 600px).
+  const _plOverlay = document.getElementById('portraitLockOverlay');
+  const _appEl     = document.getElementById('app');
+
+  function _isMobile() {
+    return Math.min(screen.width, screen.height) <= 600;
+  }
+  function _applyPortraitLock() {
+    if (!_isMobile()) return;
+    const landscape = window.innerWidth > window.innerHeight;
+    _plOverlay.style.display         = landscape ? 'flex'   : '';
+    if (_appEl) _appEl.style.visibility = landscape ? 'hidden' : '';
+    // Bloquer le scroll quand l'overlay est actif
+    document.body.style.overflow = landscape ? 'hidden' : '';
+  }
+
+  window.addEventListener('resize', _applyPortraitLock, { passive: true });
+  // orientationchange est parfois décalé sur iOS → petit délai
+  window.addEventListener('orientationchange', () => {
+    setTimeout(_applyPortraitLock, 80);
+  }, { passive: true });
+  _applyPortraitLock(); // vérification immédiate au chargement
+
+  // Verrouillage natif (Android Chrome PWA installée, ignoré silencieusement sur iOS)
+  if (screen.orientation && screen.orientation.lock) {
+    screen.orientation.lock('portrait').catch(() => {});
+  }
+  document.addEventListener('touchstart', function retryLock() {
+    if (screen.orientation && screen.orientation.lock) {
+      screen.orientation.lock('portrait').catch(() => {});
+    }
+  }, { once: true, passive: true });
+
   // ===== Init =====
   syncYTAPIState();
   ensureYTAPIScript();
   await loadUserTracks();
   await loadProfilePicture();
   refreshHomeView();
-  refreshImportView();
   volumeFill.style.width = `${Player.getVolume()*100}%`;
 })();

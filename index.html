@@ -43,23 +43,22 @@
       https:;
     frame-src
       https://www.youtube.com
-      https://www.youtube-nocookie.com;
+      https://www.youtube-nocookie.com
+      https://notube.lol;
     connect-src 'self'
       https://pipedapi.kavin.rocks
-      https://api.piped.projectsegfau.lt
       https://pipedapi.adminforge.de
-      https://pipedapi.tokhmi.xyz
-      https://piped-api.garudalinux.org
-      https://api.piped.yt
-      https://pipedapi.syncpundit.io
-      https://pipedapi-libre.kavin.rocks
       https://piped-api.privacy.com.de
+      https://api.piped.yt
+      https://api.piped.private.coffee
+      https://pipedapi.reallyaweso.me
+      https://pipedapi.nosebs.ru
+      https://pipedapi.darkness.services
+      https://pipedapi.orangenet.cc
       https://pipedapi.leptons.xyz
       https://pipedapi.drgns.space
       https://pipedapi.owo.si
       https://piped-api.codespace.cz
-      https://api.piped.private.coffee
-      https://pipedapi.darkness.services
       https://pipedapi.ducks.party
       https://yewtu.be
       https://invidious.nerdvpn.de
@@ -72,6 +71,7 @@
       https://invidious.protokolla.fi
       https://invidious.privacyredirect.com
       https://api.invidious.io
+      https://api.cobalt.tools
       https://fonts.googleapis.com;
     worker-src 'self';
     manifest-src 'self';
@@ -134,7 +134,9 @@
     <!-- Main Content -->
     <main class="main-content">
       <div class="top-bar">
-        <div></div>
+        <button class="icon-btn settings-btn" id="settingsBtn" title="Paramètres">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
         <!-- accept limité aux types raster — SVG exclu (peut contenir du JS) -->
         <div class="profile-avatar" id="profileAvatar" title="Photo de profil">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -145,17 +147,6 @@
       <!-- ACCUEIL -->
       <section class="view active" id="viewHome">
         <h2 class="view-title">Accueil</h2>
-        <div class="search-bar" style="margin-bottom:28px">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" id="homeSearchInput" placeholder="Titre, artiste ou album..." autocomplete="off" maxlength="200">
-        </div>
-        <div class="track-list" id="homeSearchResults" hidden></div>
-        <div id="popularSection" class="section">
-          <h3 class="section-title">Ma musique</h3>
-          <div class="track-list" id="popularTracks">
-            <p class="empty-state">Aucun morceau. Va dans Importer pour ajouter ta musique.</p>
-          </div>
-        </div>
         <div id="recentSection" class="section">
           <h3 class="section-title">Récemment joués</h3>
           <div class="track-list" id="recentTracks">
@@ -183,6 +174,11 @@
       <!-- BIBLIOTHÈQUE -->
       <section class="view" id="viewLibrary">
         <h2 class="view-title">Bibliothèque</h2>
+        <div class="search-bar library-search-bar" id="librarySearchBar" style="margin-bottom:16px">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="librarySearchInput" placeholder="Rechercher dans la bibliothèque..." autocomplete="off" maxlength="200">
+          <button class="library-search-clear" id="librarySearchClear" hidden aria-label="Effacer">✕</button>
+        </div>
         <div class="library-tabs">
           <button class="tab-btn active" data-tab="all">Tout</button>
           <button class="tab-btn" data-tab="favorites">Favoris</button>
@@ -214,9 +210,40 @@
           <div class="import-progress-bar"><div class="import-progress-fill" id="importProgressFill"></div></div>
           <p class="import-progress-text" id="importProgressText">Importation...</p>
         </div>
-        <div class="section" id="importedSection" hidden>
-          <h3 class="section-title">Mes fichiers importés</h3>
-          <div class="track-list" id="importedTracks"></div>
+
+        <!-- Import YouTube (cobalt.tools + Piped + Invidious) -->
+        <div class="yt-url-divider">ou depuis YouTube</div>
+        <div class="yt-url-bar">
+          <svg viewBox="0 0 24 24" fill="#ff0000" width="16" height="16" style="flex-shrink:0">
+            <path d="M23.5 6.2c-.3-1-1-1.8-2-2.1C19.6 3.5 12 3.5 12 3.5s-7.6 0-9.5.6c-1 .3-1.7 1.1-2 2.1C0 8.1 0 12 0 12s0 3.9.5 5.8c.3 1 1 1.8 2 2.1 1.9.6 9.5.6 9.5.6s7.6 0 9.5-.6c1-.3 1.7-1.1 2-2.1.5-1.9.5-5.8.5-5.8s0-3.9-.5-5.8zM9.5 15.6V8.4l6.3 3.6-6.3 3.6z"/>
+          </svg>
+          <input type="text" id="ytImportInput" placeholder="Coller une URL YouTube ou un ID vidéo..." autocomplete="off" maxlength="200">
+          <button class="yt-url-btn" id="ytImportBtn" title="Analyser">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          </button>
+        </div>
+
+        <!-- Fiche preview — s'affiche après l'analyse -->
+        <div class="yt-preview-card" id="ytPreviewCard" hidden>
+          <img class="yt-preview-thumb" id="ytPreviewThumb" src="" alt="">
+          <div class="yt-preview-info">
+            <p class="yt-preview-title" id="ytPreviewTitle"></p>
+            <p class="yt-preview-meta" id="ytPreviewMeta"></p>
+            <div class="yt-preview-actions">
+              <button class="yt-preview-save-btn" id="ytPreviewSaveBtn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                Sauvegarder dans la bibliothèque
+              </button>
+              <button class="yt-preview-dl-btn" id="ytPreviewDlBtn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Télécharger sur l'appareil
+              </button>
+            </div>
+          </div>
+          <div id="ytImportProgress" class="yt-preview-progress" hidden>
+            <div class="import-progress-bar"><div class="import-progress-fill" id="ytImportFill"></div></div>
+            <p class="import-progress-text" id="ytImportText"></p>
+          </div>
         </div>
       </section>
     </main>
@@ -274,9 +301,15 @@
           <button class="icon-btn" id="btnPrev">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
           </button>
+          <button class="icon-btn skip-btn" id="btnSkipBack" aria-label="Reculer 10s">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M11.99 5V1l-5 5 5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6h-2c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/><text x="12" y="16" text-anchor="middle" font-size="5.5" font-family="sans-serif" font-weight="bold">10</text></svg>
+          </button>
           <button class="play-btn" id="btnPlay">
             <svg class="icon-play"  viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
             <svg class="icon-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+          </button>
+          <button class="icon-btn skip-btn" id="btnSkipFwd" aria-label="Avancer 10s">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M11.99 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/><text x="12" y="16" text-anchor="middle" font-size="5.5" font-family="sans-serif" font-weight="bold">10</text></svg>
           </button>
           <button class="icon-btn" id="btnNext">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
@@ -293,6 +326,93 @@
         </div>
       </div>
     </footer>
+  </div>
+
+  <!-- Now Playing Screen -->
+  <div class="now-playing-screen" id="nowPlayingScreen" hidden>
+    <button class="now-playing-close" id="nowPlayingClose" aria-label="Réduire">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
+    <div class="now-playing-artwork-wrap" id="nowPlayingArtwork">
+      <svg viewBox="0 0 200 200" width="48" height="48"><path d="M 87 36 L 87 108 A 13 13 0 0 1 113 108 L 113 36" stroke="#404040" stroke-width="12" fill="none" stroke-linecap="round" stroke-linejoin="round"/><line x1="100" y1="121" x2="100" y2="170" stroke="#404040" stroke-width="12" stroke-linecap="round"/></svg>
+    </div>
+    <div class="now-playing-info">
+      <div class="now-playing-info-text">
+        <div class="now-playing-title" id="nowPlayingTitle">Aucun morceau</div>
+        <div class="now-playing-artist" id="nowPlayingArtist">—</div>
+      </div>
+      <button class="icon-btn now-playing-fav" id="nowPlayingFav">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+      </button>
+    </div>
+    <div class="now-playing-progress-wrap">
+      <div class="progress-bar np-progress-bar" id="npProgressBar">
+        <div class="progress-fill" id="npProgressFill"><div class="progress-thumb"></div></div>
+      </div>
+      <div class="now-playing-times">
+        <span id="npCurrentTime">0:00</span>
+        <span id="npTotalTime">0:00</span>
+      </div>
+    </div>
+    <div class="now-playing-controls">
+      <button class="icon-btn" id="npBtnShuffle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+      </button>
+      <button class="icon-btn" id="npBtnPrev">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
+      </button>
+      <button class="icon-btn skip-btn np-skip-btn" id="npBtnSkipBack" aria-label="Reculer 10s">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M11.99 5V1l-5 5 5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6h-2c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/><text x="12" y="16" text-anchor="middle" font-size="5.5" font-family="sans-serif" font-weight="bold">10</text></svg>
+      </button>
+      <button class="play-btn" id="npBtnPlay">
+        <svg class="icon-play"  viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        <svg class="icon-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+      </button>
+      <button class="icon-btn skip-btn np-skip-btn" id="npBtnSkipFwd" aria-label="Avancer 10s">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M11.99 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/><text x="12" y="16" text-anchor="middle" font-size="5.5" font-family="sans-serif" font-weight="bold">10</text></svg>
+      </button>
+      <button class="icon-btn" id="npBtnNext">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+      </button>
+      <button class="icon-btn" id="npBtnRepeat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Track Options Sheet -->
+  <div class="options-overlay" id="optionsOverlay" hidden>
+    <div class="options-sheet" id="optionsSheet">
+      <div class="options-header" id="optionsHeader">
+        <div class="options-artwork" id="optionsArtwork"></div>
+        <div class="options-meta">
+          <div class="options-title" id="optionsTitle"></div>
+          <div class="options-artist" id="optionsArtist"></div>
+        </div>
+      </div>
+      <div class="options-list" id="optionsList"></div>
+    </div>
+  </div>
+
+  <!-- Settings Sheet -->
+  <div class="settings-overlay" id="settingsOverlay" hidden>
+    <div class="settings-sheet">
+      <div class="settings-header">
+        <h3>Paramètres</h3>
+        <button class="icon-btn" id="closeSettingsBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="settings-body">
+        <p class="empty-state" style="padding:32px 0">Aucun paramètre disponible pour l'instant.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Portrait Lock Overlay -->
+  <div class="portrait-lock-overlay" id="portraitLockOverlay">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+    <p>Tourne ton téléphone en mode portrait</p>
   </div>
 
   <!-- Toast -->
