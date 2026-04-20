@@ -1148,11 +1148,6 @@
   // ===== Player Controls =====
   btnPlay.addEventListener('click', () => {
     if (ytMode) {
-      if (currentYTBlobUrl) {
-        Player.togglePlay();
-        return;
-      }
-
       if (ytPlayer && typeof ytPlayer.getPlayerState === 'function') {
         const s = ytPlayer.getPlayerState();
         if (s === YT.PlayerState.PLAYING) ytPlayer.pauseVideo();
@@ -1571,7 +1566,6 @@
   let ytSearchResults  = [];
   let ytCurrentIndex   = -1;
   let ytProgressInterval = null;
-  let currentYTBlobUrl   = null;
 
   function syncYTAPIState() {
     if (window.YT && typeof window.YT.Player === 'function') {
@@ -1594,18 +1588,6 @@
     document.head.appendChild(s);
   }
 
-  function isIOSDevice() {
-    return /iPad|iPhone|iPod/.test(navigator.userAgent);
-  }
-
-  function isStandalonePWA() {
-    return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-  }
-
-  function shouldPreferDirectYouTubePlayback() {
-    return isIOSDevice() && isStandalonePWA();
-  }
-
   window.onYouTubeIframeAPIReady = () => {
     ytAPIReady = true;
   };
@@ -1625,11 +1607,11 @@
   // Instances confirmées comme proxifiant leurs streams (URLs sur leur propre domaine).
   // Les instances qui renvoient des URLs googlevideo.com directes sont inutilisables depuis JS (CORS).
   // Elles sont gardées en fallback mais on essaie les proxifiantes d'abord.
+  // Source officielle : https://github.com/TeamPiped/documentation/blob/main/content/docs/public-instances/index.md
   const PIPED_INSTANCES = [
-    // Liste officielle TeamPiped (https://github.com/TeamPiped/Piped/wiki/Instances)
-    // Les instances confirmées comme proxifiantes passent en tête de liste.
     'https://api.piped.private.coffee',
     'https://pipedapi.kavin.rocks',
+    'https://pipedapi-libre.kavin.rocks',
     'https://pipedapi.adminforge.de',
     'https://piped-api.privacy.com.de',
     'https://api.piped.yt',
@@ -1722,62 +1704,6 @@
     throw new Error('Aucun serveur disponible');
   }
 
-  async function downloadYouTubeAsBlobUrl(videoId) {
-    const ordered = [
-      ...PIPED_INSTANCES.filter(i => _pipedProxyConfirmed.has(i)),
-      ...PIPED_INSTANCES.filter(i => !_pipedProxyConfirmed.has(i)),
-    ];
-    for (const inst of ordered) {
-      try {
-        const r = await fetchWithTimeout(`${inst}/streams/${videoId}`, { cache:'no-cache' }, 8000);
-        if (!r.ok) continue;
-        const data = await r.json();
-        if (!data.audioStreams?.length) continue;
-        const sorted = data.audioStreams.filter(s=>s.url&&s.mimeType).sort((a,b)=>(b.bitrate||0)-(a.bitrate||0));
-        // Vérifier qu'au moins un stream est proxifié (URL non-Google) — sinon CORS bloqué
-        const hasProxied = sorted.some(s => { const u = sanitizeURL(s.url); return u && !u.includes('googlevideo.com'); });
-        if (!hasProxied) continue;
-        for (const stream of sorted.slice(0,3)) {
-          try {
-            const rawUrl = sanitizeURL(stream.url);
-            if (!rawUrl || rawUrl.includes('googlevideo.com')) continue;
-            try {
-              const ar = await fetchWithTimeout(rawUrl, {}, 120000);
-              if (!ar.ok) continue;
-              const contentType = ar.headers.get('content-type') || '';
-              if (contentType && !contentType.startsWith('audio/') && !contentType.startsWith('video/') && !contentType.includes('octet-stream')) continue;
-              const blob = await ar.blob();
-              if (blob.size > 5000) { _pipedProxyConfirmed.add(inst); return URL.createObjectURL(blob); }
-            } catch {}
-          } catch {}
-        }
-      } catch(e) {
-        if (e.name !== 'AbortError') console.error('Piped blob error:', inst);
-      }
-    }
-    const invs = await getInvidiousInstances();
-    for (const inst of invs) {
-      try {
-        const r = await fetchWithTimeout(`${inst}/api/v1/videos/${videoId}?fields=adaptiveFormats`, {}, 8000);
-        if (!r.ok) continue;
-        const data = await r.json();
-        const fmts = (data.adaptiveFormats||[]).filter(f=>f.type?.startsWith('audio/')&&f.itag).sort((a,b)=>(parseInt(b.bitrate)||0)-(parseInt(a.bitrate)||0));
-        for (const fmt of fmts.slice(0,2)) {
-          try {
-            const url = `${inst}/latest_version?id=${videoId}&itag=${encodeURIComponent(fmt.itag)}&local=true`;
-            const ar = await fetchWithTimeout(url, {}, 120000);
-            if (!ar.ok) continue;
-            const blob = await ar.blob();
-            if (blob.size > 5000) return URL.createObjectURL(blob);
-          } catch {}
-        }
-      } catch(e) {
-        if (e.name !== 'AbortError') console.error('Invidious blob error:', inst);
-      }
-    }
-    return null;
-  }
-
   async function playYouTubeVideo(index) {
     const item = ytSearchResults[index]; if (!item) return;
     const videoId = getVideoId(item);
@@ -1785,7 +1711,6 @@
     const rawThumb = item.thumbnail || '';
     const thumb = sanitizeURL(rawThumb) || '';
 
-    if (currentYTBlobUrl) { URL.revokeObjectURL(currentYTBlobUrl); currentYTBlobUrl = null; }
     ytCurrentIndex = index;
     ytCurrentVideo = { videoId, title:item.title||'', artist:item.uploaderName||'', thumbnail:thumb };
     ytMode = true;
@@ -1809,29 +1734,9 @@
     $$('.yt-result-item').forEach(el => el.classList.remove('yt-playing'));
     const el = document.querySelector(`.yt-result-item[data-index="${index}"]`);
     if (el) el.classList.add('yt-playing');
-    showToast('Chargement...');
 
-    if (shouldPreferDirectYouTubePlayback()) {
-      showToast('Lecture via YouTube...');
-      playYouTubeIFrame(videoId, index);
-      return;
-    }
-
-    try {
-      const blobUrl = await downloadYouTubeAsBlobUrl(videoId);
-      if (blobUrl) {
-        currentYTBlobUrl = blobUrl;
-        const ok = await Player.playExternal(blobUrl);
-        if (ok) {
-          if (ytPlayer && typeof ytPlayer.stopVideo === 'function') {
-            ytPlayer.stopVideo();
-          }
-          updateYTMediaSession();
-          showToast('');
-          return;
-        }
-      }
-    } catch(e) { console.error('Blob download failed:', e); }
+    // L'iframe YouTube est prioritaire pour la lecture simple (pas de téléchargement).
+    // Le téléchargement reste disponible via les boutons « Sauvegarder » et « Télécharger ».
     showToast('Lecture via YouTube...');
     playYouTubeIFrame(videoId, index);
   }
@@ -1918,7 +1823,6 @@
     if (ytPlayer && typeof ytPlayer.stopVideo === 'function') ytPlayer.stopVideo();
     playerFavorite.style.display = '';
     $$('.yt-result-item').forEach(el => el.classList.remove('yt-playing'));
-    if (currentYTBlobUrl) { URL.revokeObjectURL(currentYTBlobUrl); currentYTBlobUrl = null; }
   }
 
   /**
