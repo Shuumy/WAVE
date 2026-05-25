@@ -1937,16 +1937,18 @@
         const sorted = data.audioStreams.filter(s=>s.url&&s.mimeType).sort((a,b)=>(b.bitrate||0)-(a.bitrate||0));
         if(!sorted.length) continue;
 
-        // Vérifier si au moins un stream est proxifié (URL non-Google) — évite 120s de timeout inutile
-        const hasProxied = sorted.some(s => { const u = sanitizeURL(s.url); return u && !u.includes('googlevideo.com'); });
+        // Vérifier si au moins un stream est proxifié — on compare le hostname, pas toute l'URL,
+        // car les URLs Piped proxy ont souvent googlevideo.com en paramètre de requête (?host=...)
+        const isGoogleCDN = u => { try { return new URL(u).hostname.endsWith('googlevideo.com'); } catch { return true; } };
+        const hasProxied = sorted.some(s => { const u = sanitizeURL(s.url); return u && !isGoogleCDN(u); });
         if (!hasProxied) continue;
 
         for (const stream of sorted.slice(0, 3)) {
           const rawUrl = sanitizeURL(stream.url);
-          if (!rawUrl || rawUrl.includes('googlevideo.com')) continue;
+          if (!rawUrl || isGoogleCDN(rawUrl)) continue;
 
           try {
-            const ar = await fetchWithTimeout(rawUrl, {}, 120000);
+            const ar = await fetchWithTimeout(rawUrl, {}, 45000);
             if (!ar.ok) continue;
             const contentType = ar.headers.get('content-type') || '';
             if (contentType && !contentType.startsWith('audio/') && !contentType.startsWith('video/') && !contentType.includes('octet-stream')) continue;
@@ -1978,7 +1980,7 @@
         for (const fmt of fmts.slice(0, 3)) {
           try {
             const url = `${inst}/latest_version?id=${encodeURIComponent(videoId)}&itag=${encodeURIComponent(fmt.itag)}&local=true`;
-            const ar = await fetchWithTimeout(url, {}, 120000); if(!ar.ok) continue;
+            const ar = await fetchWithTimeout(url, {}, 45000); if(!ar.ok) continue;
             const blob = await ar.blob(); if(!blob||blob.size<10000) continue;
             return { blob, mimeType:fmt.type.split(';')[0], pipedTitle:data.title, pipedUploader:data.author, pipedDuration:data.lengthSeconds };
           } catch { /* format suivant */ }
