@@ -1328,7 +1328,7 @@
   fileInput.addEventListener('change', () => { if(fileInput.files.length) { importFiles(fileInput.files); fileInput.value=''; } });
   importDropzone.addEventListener('click', (e) => { if(!e.target.closest('.import-btn') && e.target.tagName!=='LABEL') fileInput.click(); });
 
-  // ===== Import YouTube (cobalt → Piped → Invidious) =====
+  // ===== Import YouTube (Piped → Invidious) =====
   const ytImportInput    = $('#ytImportInput');
   const ytImportBtn      = $('#ytImportBtn');
   const ytPreviewCard    = $('#ytPreviewCard');
@@ -1428,7 +1428,7 @@
     _ytPreviewData = { videoId, title: displayTitle, artist: displayArtist, duration, thumbnailUrl };
   }
 
-  // Étape 2a : sauvegarder dans la bibliothèque (cobalt → Piped → Invidious)
+  // Étape 2a : sauvegarder dans la bibliothèque (Piped → Invidious)
   async function saveFromYouTube() {
     if (!_ytPreviewData) return;
     const { videoId, title, artist, duration, thumbnailUrl } = _ytPreviewData;
@@ -1437,32 +1437,24 @@
     ytImportFill.style.width = '5%'; ytImportText.textContent = 'Connexion...';
     try {
       let blob, mimeType, pipedTitle, pipedUploader, pipedDuration;
-      // 1. cobalt.tools (yt-dlp)
+      // 1. Piped
       try {
-        ytImportText.textContent = 'cobalt.tools (yt-dlp)...';
-        ytImportFill.style.width = '15%';
-        ({ blob, mimeType } = await downloadFromCobalt(videoId));
-        pipedTitle = title; pipedUploader = artist; pipedDuration = duration;
+        ytImportFill.style.width = '15%'; ytImportText.textContent = 'Piped...';
+        const res = await downloadFromPiped(videoId, (c,t) => {
+          ytImportFill.style.width = `${15 + Math.round(c/t*55)}%`;
+          ytImportText.textContent = `Piped ${c}/${t}...`;
+        });
+        ({ blob, mimeType } = res);
+        pipedTitle = res.pipedTitle; pipedUploader = res.pipedUploader; pipedDuration = res.pipedDuration;
       } catch {
-        // 2. Piped
-        try {
-          ytImportFill.style.width = '25%'; ytImportText.textContent = 'Piped...';
-          const res = await downloadFromPiped(videoId, (c,t) => {
-            ytImportFill.style.width = `${25 + Math.round(c/t*35)}%`;
-            ytImportText.textContent = `Piped ${c}/${t}...`;
-          });
-          ({ blob, mimeType } = res);
-          pipedTitle = res.pipedTitle; pipedUploader = res.pipedUploader; pipedDuration = res.pipedDuration;
-        } catch {
-          // 3. Invidious
-          ytImportFill.style.width = '65%'; ytImportText.textContent = 'Invidious...';
-          const res = await downloadFromInvidious(videoId, (c,t) => {
-            ytImportFill.style.width = `${65 + Math.round(c/t*20)}%`;
-            ytImportText.textContent = `Invidious ${c}/${t}...`;
-          });
-          ({ blob, mimeType } = res);
-          pipedTitle = res.pipedTitle; pipedUploader = res.pipedUploader; pipedDuration = res.pipedDuration;
-        }
+        // 2. Invidious
+        ytImportFill.style.width = '72%'; ytImportText.textContent = 'Invidious...';
+        const res = await downloadFromInvidious(videoId, (c,t) => {
+          ytImportFill.style.width = `${72 + Math.round(c/t*15)}%`;
+          ytImportText.textContent = `Invidious ${c}/${t}...`;
+        });
+        ({ blob, mimeType } = res);
+        pipedTitle = res.pipedTitle; pipedUploader = res.pipedUploader; pipedDuration = res.pipedDuration;
       }
       ytImportFill.style.width = '88%'; ytImportText.textContent = 'Validation...';
       const { duration: audioDuration } = await validateAudio(blob);
@@ -1499,7 +1491,7 @@
     }
   }
 
-  // Étape 2b : télécharger directement sur l'appareil (cobalt → Piped → Invidious)
+  // Étape 2b : télécharger directement sur l'appareil (Piped → Invidious)
   async function downloadToDevice() {
     if (!_ytPreviewData) return;
     const { videoId, title } = _ytPreviewData;
@@ -1509,18 +1501,13 @@
     try {
       let blob, mimeType;
       try {
-        ytImportText.textContent = 'cobalt.tools...'; ytImportFill.style.width = '20%';
-        ({ blob, mimeType } = await downloadFromCobalt(videoId));
+        ytImportText.textContent = 'Piped...'; ytImportFill.style.width = '20%';
+        const res = await downloadFromPiped(videoId);
+        blob = res.blob; mimeType = res.mimeType;
       } catch {
-        try {
-          ytImportText.textContent = 'Piped...'; ytImportFill.style.width = '40%';
-          const res = await downloadFromPiped(videoId);
-          blob = res.blob; mimeType = res.mimeType;
-        } catch {
-          ytImportText.textContent = 'Invidious...'; ytImportFill.style.width = '65%';
-          const res = await downloadFromInvidious(videoId);
-          blob = res.blob; mimeType = res.mimeType;
-        }
+        ytImportText.textContent = 'Invidious...'; ytImportFill.style.width = '55%';
+        const res = await downloadFromInvidious(videoId);
+        blob = res.blob; mimeType = res.mimeType;
       }
       ytImportFill.style.width = '95%'; ytImportText.textContent = 'Préparation du fichier...';
       const mime = (mimeType||'').split(';')[0];
@@ -1888,19 +1875,13 @@
     try {
       showToast('Téléchargement en cours...');
       let res;
-      // 1. cobalt.tools (yt-dlp) — le plus fiable
+      // 1. Piped
       try {
-        const { blob, mimeType } = await downloadFromCobalt(videoId);
-        res = { blob, mimeType, pipedTitle: item.title||'', pipedUploader: item.uploaderName||'', pipedDuration: 0 };
+        res = await downloadFromPiped(videoId, (c,t)=>{if(c>1)showToast(`Piped ${c}/${t}...`);});
       } catch {
-        // 2. Piped
-        try {
-          res = await downloadFromPiped(videoId, (c,t)=>{if(c>1)showToast(`Piped ${c}/${t}...`);});
-        } catch {
-          // 3. Invidious
-          showToast('Piped indisponible, essai Invidious...');
-          res = await downloadFromInvidious(videoId, (c,t)=>showToast(`Invidious ${c}/${t}...`));
-        }
+        // 2. Invidious
+        showToast('Piped indisponible, essai Invidious...');
+        res = await downloadFromInvidious(videoId, (c,t)=>showToast(`Invidious ${c}/${t}...`));
       }
       const { blob, mimeType, pipedTitle, pipedUploader, pipedDuration } = res;
       const mime = (mimeType||'').split(';')[0];
@@ -1937,27 +1918,6 @@
       btn.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
       showToast('Erreur: '+(err.message||'Échec'));
     }
-  }
-
-  // ===== cobalt.tools (yt-dlp backend) — tentative en premier avant Piped =====
-  async function downloadFromCobalt(videoId) {
-    const ytUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
-    // API cobalt v10+ : endpoint racine, nouveaux paramètres downloadMode / audioFormat
-    const r = await fetchWithTimeout('https://api.cobalt.tools/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify({ url: ytUrl, downloadMode: 'audio', audioFormat: 'best' })
-    }, 15000);
-    if (!r.ok) throw new Error(`cobalt HTTP ${r.status}`);
-    const data = await r.json();
-    if (data.status === 'error') throw new Error(`cobalt: ${data.error?.code || 'erreur'}`);
-    const streamUrl = sanitizeURL(data.url || '');
-    if (!streamUrl) throw new Error('cobalt: pas d\'URL');
-    const ar = await fetchWithTimeout(streamUrl, {}, 120000);
-    if (!ar.ok) throw new Error(`cobalt stream HTTP ${ar.status}`);
-    const blob = await ar.blob();
-    if (!blob || blob.size < 10000) throw new Error('cobalt: fichier trop petit');
-    return { blob, mimeType: ar.headers.get('content-type') || 'audio/mpeg' };
   }
 
   async function downloadFromPiped(videoId, onProgress) {
