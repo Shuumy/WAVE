@@ -3,17 +3,11 @@ name: Apply direct WAVE API refactor
 on:
   workflow_dispatch:
   push:
-    branches:
-      - refactor/direct-wave-api
-    paths:
-      - tools/refactor_direct_wave_api.py
-      - .github/workflows/apply-direct-wave-refactor.yml
+    branches: [refactor/direct-wave-api]
+    paths: [tools/refactor_direct_wave_api.py, .github/workflows/apply-direct-wave-refactor.yml]
   pull_request:
-    branches:
-      - main
-    paths:
-      - tools/refactor_direct_wave_api.py
-      - .github/workflows/apply-direct-wave-refactor.yml
+    branches: [main]
+    paths: [tools/refactor_direct_wave_api.py, .github/workflows/apply-direct-wave-refactor.yml]
 
 permissions:
   contents: write
@@ -30,7 +24,18 @@ jobs:
         with:
           python-version: '3.12'
       - name: Nettoyer le frontend historique
-        run: python tools/refactor_direct_wave_api.py
+        run: |
+          set -o pipefail
+          python tools/refactor_direct_wave_api.py 2>&1 | tee /tmp/refactor.log
+      - name: Conserver l’erreur pour analyse
+        if: failure()
+        run: |
+          cp /tmp/refactor.log refactor-error.log
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add refactor-error.log
+          git commit -m 'debug: enregistrer l’erreur du refactor' || true
+          git push origin HEAD:refactor/direct-wave-api
       - name: Vérifier les références obsolètes
         run: |
           ! grep -R -n -E 'PIPED_INSTANCES|INVIDIOUS_FALLBACK|downloadFromPiped|downloadFromInvidious|api\.invidious\.io' js/app.js
@@ -38,7 +43,7 @@ jobs:
           python -m py_compile backend/main.py backend/diagnostic_app.py
       - name: Enregistrer le résultat et retirer les outils temporaires
         run: |
-          rm -f tools/refactor_direct_wave_api.py .github/workflows/apply-direct-wave-refactor.yml
+          rm -f tools/refactor_direct_wave_api.py .github/workflows/apply-direct-wave-refactor.yml refactor-error.log
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
