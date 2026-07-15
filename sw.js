@@ -1,6 +1,6 @@
 // WAVE service worker
-const CACHE_NAME = 'wave-v12';
-const API_ORIGIN = 'https://wave-jc53.onrender.com';
+const CACHE_NAME = 'wave-v13';
+const API_ORIGIN = 'https://wave-docker.onrender.com';
 const ASSETS = [
   './',
   './index.html',
