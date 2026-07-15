@@ -1,143 +1,63 @@
 /*
- * WAVE — Routeur dynamique Piped
+ * WAVE — Pont de téléchargement yt-dlp
  *
- * Intercepte les requêtes /streams/{videoId} de l'ancien téléchargeur et teste
- * la liste officielle des instances Piped. Seules les réponses contenant au
- * moins un flux audio HTTPS proxifié sont acceptées.
+ * L'ancien code de WAVE demande d'abord /streams/{videoId} à une instance
+ * Piped. Ce pont intercepte cette requête et renvoie une réponse compatible
+ * pointant vers le backend WAVE. Le reste de l'application peut donc rester
+ * inchangé, tandis que le fichier audio est produit par yt-dlp sur Render.
  */
 (() => {
   'use strict';
 
+  const API_BASE_URL = window.WAVE_API_BASE_URL || 'https://wave-jc53.onrender.com';
   const nativeFetch = window.fetch.bind(window);
-  const OFFICIAL_PIPED_INSTANCES = [
-    'https://pipedapi.kavin.rocks',
-    'https://pipedapi-libre.kavin.rocks',
-    'https://pipedapi.leptons.xyz',
-    'https://pipedapi.nosebs.ru',
-    'https://piped-api.privacy.com.de',
-    'https://pipedapi.adminforge.de',
-    'https://api.piped.yt',
-    'https://pipedapi.drgns.space',
-    'https://pipedapi.owo.si',
-    'https://pipedapi.ducks.party',
-    'https://piped-api.codespace.cz',
-    'https://pipedapi.reallyaweso.me',
-    'https://api.piped.private.coffee',
-    'https://pipedapi.darkness.services',
-    'https://pipedapi.orangenet.cc',
-  ];
 
-  const preferred = [];
-  const failedUntil = new Map();
-  const FAILURE_TTL = 10 * 60 * 1000;
-
-  function parseStreamsRequest(resource) {
+  function parseLegacyStreamsRequest(resource) {
     try {
       const raw = typeof resource === 'string' ? resource : resource?.url;
       const url = new URL(raw, window.location.href);
       const match = url.pathname.match(/\/streams\/([A-Za-z0-9_-]{11})$/);
-      return match ? { url, videoId: match[1] } : null;
+      return match ? { videoId: match[1] } : null;
     } catch {
       return null;
     }
   }
 
-  function isDirectGoogleVideo(url) {
-    try {
-      return new URL(url).hostname.endsWith('googlevideo.com');
-    } catch {
-      return true;
-    }
+  function buildCompatibilityPayload(videoId) {
+    const downloadUrl = new URL(`/api/download/${encodeURIComponent(videoId)}`, API_BASE_URL);
+
+    return {
+      title: '',
+      uploader: '',
+      duration: 0,
+      thumbnailUrl: `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/hqdefault.jpg`,
+      audioStreams: [
+        {
+          url: downloadUrl.toString(),
+          mimeType: 'audio/mp4',
+          bitrate: 128000,
+          quality: 'WAVE yt-dlp',
+          format: 'M4A/WebM',
+        },
+      ],
+      waveProvider: 'yt-dlp',
+    };
   }
 
-  function hasUsableAudio(data) {
-    return Array.isArray(data?.audioStreams) && data.audioStreams.some(stream =>
-      typeof stream?.url === 'string'
-      && stream.url.startsWith('https://')
-      && !isDirectGoogleVideo(stream.url)
-      && typeof stream?.mimeType === 'string'
-    );
-  }
-
-  function orderedInstances() {
-    const now = Date.now();
-    const available = OFFICIAL_PIPED_INSTANCES.filter(instance =>
-      !failedUntil.has(instance) || failedUntil.get(instance) <= now
-    );
-    return [
-      ...preferred.filter(instance => available.includes(instance)),
-      ...available.filter(instance => !preferred.includes(instance)),
-    ];
-  }
-
-  async function fetchWithDeadline(url, timeoutMs = 9000) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      return await nativeFetch(url, {
-        method: 'GET',
-        cache: 'no-store',
-        credentials: 'omit',
-        headers: { Accept: 'application/json' },
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  async function checkInstance(instance, videoId) {
-    try {
-      const response = await fetchWithDeadline(`${instance}/streams/${encodeURIComponent(videoId)}`);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
-      if (!hasUsableAudio(data)) throw new Error('Aucun flux audio proxifié');
-      failedUntil.delete(instance);
-      const oldIndex = preferred.indexOf(instance);
-      if (oldIndex !== -1) preferred.splice(oldIndex, 1);
-      preferred.unshift(instance);
-      preferred.splice(4);
-      return { instance, data };
-    } catch (error) {
-      failedUntil.set(instance, Date.now() + FAILURE_TTL);
-      throw error;
-    }
-  }
-
-  async function findWorkingInstance(videoId) {
-    const candidates = orderedInstances();
-    const batchSize = 4;
-
-    for (let offset = 0; offset < candidates.length; offset += batchSize) {
-      const batch = candidates.slice(offset, offset + batchSize);
-      const winner = await Promise.any(batch.map(instance => checkInstance(instance, videoId)))
-        .catch(() => null);
-      if (winner) return winner;
-    }
-
-    throw new Error('Aucune instance Piped avec flux audio proxifié');
-  }
-
-  window.fetch = async function wavePipedFetch(resource, options) {
-    const request = parseStreamsRequest(resource);
+  window.fetch = async function waveYtDlpFetch(resource, options) {
+    const request = parseLegacyStreamsRequest(resource);
     if (!request) return nativeFetch(resource, options);
 
-    try {
-      const { instance, data } = await findWorkingInstance(request.videoId);
-      console.info(`[WAVE/Piped] Instance active : ${instance}`);
-      return new Response(JSON.stringify(data), {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/json; charset=utf-8',
-          'Cache-Control': 'no-store',
-          'X-WAVE-Piped-Instance': instance,
-        },
-      });
-    } catch (error) {
-      console.warn('[WAVE/Piped] Aucun serveur utilisable :', error);
-      return nativeFetch(resource, options);
-    }
+    console.info(`[WAVE/yt-dlp] Téléchargement préparé pour ${request.videoId}`);
+    return new Response(JSON.stringify(buildCompatibilityPayload(request.videoId)), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'X-WAVE-Download-Provider': 'yt-dlp',
+      },
+    });
   };
 
-  window.WAVE_PIPED_INSTANCES = Object.freeze([...OFFICIAL_PIPED_INSTANCES]);
+  window.WAVE_DOWNLOAD_PROVIDER = 'yt-dlp';
 })();
