@@ -1,5 +1,5 @@
 // WAVE service worker — cache applicatif et injection du pont Samsung
-const CACHE_NAME = 'wave-v16';
+const CACHE_NAME = 'wave-v17';
 const LOCAL_BRIDGE_ORIGINS = ['http://127.0.0.1:8765', 'http://localhost:8765'];
 const ASSETS = [
   './', './index.html', './css/style.css', './js/db.js', './js/tracks.js',

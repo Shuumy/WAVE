@@ -15,9 +15,9 @@
 
   let bridgeState = 'unknown';
   let statusText = 'Vérification du Samsung…';
-  let card = null;
-  let cardCopy = null;
-  let cardDot = null;
+  let statusButton = null;
+  let statusCopy = null;
+  let statusDot = null;
 
   function requestUrl(resource) {
     try {
@@ -32,17 +32,18 @@
     return `${LOCAL_BRIDGE_ORIGIN}/api/download/${encodeURIComponent(videoId)}`;
   }
 
-  function updateCard() {
-    if (!card || !cardCopy || !cardDot) return;
-    card.dataset.state = bridgeState;
-    cardCopy.textContent = statusText;
-    cardDot.dataset.state = bridgeState;
+  function updateStatus() {
+    if (!statusButton || !statusCopy || !statusDot) return;
+    statusButton.dataset.state = bridgeState;
+    statusButton.setAttribute('aria-label', statusText);
+    statusCopy.textContent = statusText;
+    statusDot.dataset.state = bridgeState;
   }
 
   function setBridgeState(state, text) {
     bridgeState = state;
     statusText = text;
-    updateCard();
+    updateStatus();
     window.dispatchEvent(new CustomEvent('wave:samsung-bridge', {
       detail: { state, text, origin: LOCAL_BRIDGE_ORIGIN },
     }));
@@ -67,7 +68,7 @@
       setBridgeState('ready', `Samsung connecté · yt-dlp ${payload.ytDlpVersion || 'prêt'}`);
       return payload;
     } catch {
-      setBridgeState('offline', 'Termux arrêté · lance la commande wave-start');
+      setBridgeState('offline', 'Samsung déconnecté · lance wave-start dans Termux');
       return null;
     } finally {
       clearTimeout(timeout);
@@ -97,63 +98,57 @@
         : `Samsung connecté · erreur ${response.status}`);
       return response;
     } catch (error) {
-      setBridgeState('offline', 'Termux arrêté · lance la commande wave-start');
+      setBridgeState('offline', 'Samsung déconnecté · lance wave-start dans Termux');
       throw new Error('Pont Samsung hors ligne. Ouvre Termux puis lance wave-start.', { cause: error });
     }
   };
 
-  function installBridgeCard() {
-    const oldCard = document.querySelector('.notube-external-card');
-    if (!oldCard) return;
+  function installSearchStatus() {
+    const searchView = document.querySelector('#viewSearch');
+    const searchBar = searchView?.querySelector('.yt-search-bar');
+    if (!searchView || !searchBar || document.querySelector('#waveSamsungStatus')) return;
 
     const style = document.createElement('style');
     style.textContent = `
-      .notube-external-card#waveSamsungBridgeCard {
-        width:100%; cursor:pointer; font:inherit; text-align:left;
+      #waveSamsungStatus {
+        width:100%; display:flex; align-items:center; gap:10px;
+        margin:12px 0 14px; padding:10px 12px;
+        border:1px solid var(--border); border-radius:var(--radius-sm);
+        background:var(--bg-secondary); color:var(--text-secondary);
+        font:inherit; font-size:.74rem; text-align:left; cursor:pointer;
+        transition:border-color var(--transition), background var(--transition);
       }
-      #waveSamsungBridgeCard[data-state='ready'] { border-color:rgba(34,197,94,.55); }
-      #waveSamsungBridgeCard[data-state='offline'] { border-color:rgba(239,68,68,.45); }
-      #waveSamsungBridgeCard[data-state='checking'],
-      #waveSamsungBridgeCard[data-state='downloading'] { border-color:rgba(255,204,0,.55); }
+      #waveSamsungStatus:hover,
+      #waveSamsungStatus:focus-visible { background:var(--bg-hover); outline:none; }
+      #waveSamsungStatus[data-state='ready'] { border-color:rgba(34,197,94,.5); color:var(--text-primary); }
+      #waveSamsungStatus[data-state='offline'] { border-color:rgba(239,68,68,.38); }
+      #waveSamsungStatus[data-state='checking'],
+      #waveSamsungStatus[data-state='downloading'] { border-color:rgba(255,204,0,.5); }
       .wave-local-dot {
-        width:10px; height:10px; border-radius:50%; flex-shrink:0;
+        width:9px; height:9px; border-radius:50%; flex-shrink:0;
         background:#777; box-shadow:0 0 0 4px rgba(255,255,255,.04);
       }
       .wave-local-dot[data-state='ready'] { background:#22c55e; box-shadow:0 0 9px rgba(34,197,94,.8); }
-      .wave-local-dot[data-state='offline'] { background:#ef4444; box-shadow:0 0 9px rgba(239,68,68,.55); }
+      .wave-local-dot[data-state='offline'] { background:#ef4444; box-shadow:0 0 8px rgba(239,68,68,.5); }
       .wave-local-dot[data-state='checking'],
       .wave-local-dot[data-state='downloading'] { background:#ffcc00; animation:waveLocalPulse 1s infinite alternate; }
+      .wave-samsung-status-copy { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
       @keyframes waveLocalPulse { from { opacity:.45; } to { opacity:1; } }
     `;
     document.head.appendChild(style);
 
-    const divider = document.querySelector('.external-download-divider');
-    if (divider) divider.textContent = 'Téléchargement local Samsung';
-
-    card = document.createElement('button');
-    card.type = 'button';
-    card.id = 'waveSamsungBridgeCard';
-    card.className = oldCard.className;
-    card.setAttribute('aria-label', 'Vérifier le pont local Samsung');
-    card.innerHTML = `
-      <span class="notube-external-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-          <rect x="6" y="2" width="12" height="20" rx="2"/>
-          <path d="M10 18h4"/>
-          <path d="M9 7h6M9 11h6"/>
-        </svg>
-      </span>
-      <span class="notube-external-copy">
-        <strong>Pont Samsung</strong>
-        <small id="waveSamsungBridgeCopy">Vérification du Samsung…</small>
-      </span>
-      <span class="wave-local-dot" id="waveSamsungBridgeDot" aria-hidden="true"></span>
+    statusButton = document.createElement('button');
+    statusButton.type = 'button';
+    statusButton.id = 'waveSamsungStatus';
+    statusButton.innerHTML = `
+      <span class="wave-local-dot" id="waveSamsungStatusDot" aria-hidden="true"></span>
+      <span class="wave-samsung-status-copy" id="waveSamsungStatusCopy">Vérification du Samsung…</span>
     `;
-    oldCard.replaceWith(card);
-    cardCopy = card.querySelector('#waveSamsungBridgeCopy');
-    cardDot = card.querySelector('#waveSamsungBridgeDot');
-    card.addEventListener('click', checkBridge);
-    updateCard();
+    searchBar.before(statusButton);
+    statusCopy = statusButton.querySelector('#waveSamsungStatusCopy');
+    statusDot = statusButton.querySelector('#waveSamsungStatusDot');
+    statusButton.addEventListener('click', checkBridge);
+    updateStatus();
     checkBridge();
   }
 
@@ -164,9 +159,9 @@
   };
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', installBridgeCard, { once: true });
+    document.addEventListener('DOMContentLoaded', installSearchStatus, { once: true });
   } else {
-    installBridgeCard();
+    installSearchStatus();
   }
 
   document.addEventListener('visibilitychange', () => {
