@@ -13,7 +13,7 @@ ligne.
   développement local sont autorisées par CORS ;
 - un seul téléchargement est accepté à la fois ;
 - la taille maximale est de 100 Mo ;
-- aucun cookie n'est nécessaire pour commencer.
+- aucun cookie, compte, mot de passe ou secret n'est lu par le pont.
 
 ## Installation
 
@@ -55,15 +55,3 @@ Android peut arrêter Termux en arrière-plan. Dans les paramètres du Samsung,
 place Termux dans les applications **Non restreintes** ou désactive son
 optimisation de batterie. Le script utilise aussi le verrou de réveil Termux tant
 que `wave-start` fonctionne.
-
-## Cookies facultatifs
-
-Pour les vidéos publiques, commence sans cookies. Si YouTube exige réellement une
-session, le pont peut lire un fichier Netscape à cet emplacement :
-
-```text
-~/.config/wave-bridge/cookies.txt
-```
-
-Ne publie jamais ce fichier et ne l'envoie jamais dans une conversation ou une
-capture d'écran : il donne accès à ta session YouTube.
