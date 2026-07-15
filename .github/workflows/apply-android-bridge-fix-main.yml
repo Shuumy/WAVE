@@ -84,3 +84,5 @@ jobs:
           git add index.html sw.js .github/workflows/samsung-bridge.yml
           git commit -m 'fix: charger le pont Samsung dès le premier écran Android'
           git push origin HEAD:main
+
+# Ce commentaire déclenche le workflow après sa création initiale.
