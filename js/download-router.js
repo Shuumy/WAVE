@@ -8,7 +8,7 @@
 (() => {
   'use strict';
 
-  const API_BASE_URL = window.WAVE_API_BASE_URL || 'https://wave-jc53.onrender.com';
+  const API_BASE_URL = window.WAVE_API_BASE_URL || 'https://wave-docker.onrender.com';
   const nativeFetch = window.fetch.bind(window);
 
   function parseLegacyStreamRequest(resource) {
@@ -45,10 +45,10 @@
         url: downloadUrl.toString(),
         mimeType: 'application/octet-stream',
         bitrate: 128000,
-        quality: 'WAVE yt-dlp',
+        quality: 'WAVE yt-dlp + PO Token',
         format: 'M4A/WebM',
       }],
-      waveProvider: 'yt-dlp',
+      waveProvider: 'yt-dlp+bgutil',
     };
   }
 
@@ -78,7 +78,7 @@
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
           'Cache-Control': 'no-store',
-          'X-WAVE-Download-Provider': 'yt-dlp',
+          'X-WAVE-Download-Provider': 'yt-dlp+bgutil',
         },
       });
     }
@@ -123,5 +123,5 @@
     start();
   }
 
-  window.WAVE_DOWNLOAD_PROVIDER = 'yt-dlp';
+  window.WAVE_DOWNLOAD_PROVIDER = 'yt-dlp+bgutil';
 })();
