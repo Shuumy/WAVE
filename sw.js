@@ -1,10 +1,12 @@
 /**
  * WAVE — Service Worker
- * SÉCURITÉ : Stratégie cache améliorée avec revalidation réseau.
- * Les assets de l'app sont servis depuis le cache avec mise à jour en arrière-plan.
+ *
+ * Met en cache les assets locaux et injecte explicitement le client WAVE API
+ * avant app.js. Les requêtes externes ne sont jamais mises en cache.
  */
 
-const CACHE_NAME = 'wave-v5';
+const CACHE_NAME = 'wave-v8';
+const API_ORIGIN = 'https://wave-jc53.onrender.com';
 const ASSETS = [
   './',
   './index.html',
@@ -12,64 +14,102 @@ const ASSETS = [
   './js/db.js',
   './js/tracks.js',
   './js/player.js',
+  './js/ytmusic-api.js',
   './js/app.js',
   './manifest.json',
 ];
 
-// ── Install : mise en cache initiale ─────────────────────────────────────────
-self.addEventListener('install', (e) => {
-  e.waitUntil(
+self.addEventListener('install', event => {
+  event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => cache.addAll(ASSETS))
-      .catch(err => console.error('[SW] Cache install failed:', err))
+      .catch(error => console.error('[SW] Cache install failed:', error))
   );
   self.skipWaiting();
 });
 
-// ── Activate : suppression des anciens caches ──────────────────────────────────────────────────── 
-self.addEventListener('activate', (e) => {
-  e.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(
-        keys
-          .filter(k => k !== CACHE_NAME)
-          .map(k => caches.delete(k))
-      )
-    )
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys().then(keys => Promise.all(
+      keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))
+    ))
   );
   self.clients.claim();
 });
 
-// ── Fetch : stratégie différenciée par type de ressource ─────────────────────────────────
-self.addEventListener('fetch', (e) => {
-  const { request } = e;
+self.addEventListener('fetch', event => {
+  const { request } = event;
   const url = new URL(request.url);
 
-  // Ne pas intercepter les requêtes vers des serveurs externes (Piped, Invidious, YouTube)
-  // Ces ressources ne doivent pas être mises en cache par le SW
+  if (request.mode === 'navigate' && url.origin === self.location.origin) {
+    event.respondWith(loadAppShell(request));
+    return;
+  }
+
   if (url.origin !== self.location.origin) {
-    e.respondWith(fetch(request).catch(() => new Response('', { status: 503 })));
+    event.respondWith(fetch(request).catch(() => new Response('', { status: 503 })));
     return;
   }
 
-  // Pour les assets de l'app : stale-while-revalidate
-  // ₒ Servir depuis le cache immédiatement, puis mettre à jour en arrière-plan
   if (ASSETS.some(asset => url.pathname.endsWith(asset.replace('./', '/')))) {
-    e.respondWith(staleWhileRevalidate(request));
+    event.respondWith(staleWhileRevalidate(request));
     return;
   }
 
-  // Pour tout le reste (IndexedDB, blob:, etc.) : réseau en priorité
-  e.respondWith(
-    fetch(request).catch(() => caches.match(request))
-  );
+  event.respondWith(fetch(request).catch(() => caches.match(request)));
 });
+
+async function loadAppShell(request) {
+  let response;
+
+  try {
+    response = await fetch(request, { cache: 'no-cache' });
+    const cache = await caches.open(CACHE_NAME);
+    if (response.ok) await cache.put('./index.html', response.clone());
+  } catch {
+    response = await caches.match('./index.html');
+  }
+
+  if (!response) return new Response('WAVE indisponible hors ligne', { status: 503 });
+
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('text/html')) return response;
+
+  let html = await response.text();
+
+  // Le navigateur applique la CSP du document transformé. On autorise donc
+  // explicitement le backend Render dans connect-src.
+  if (!html.includes(API_ORIGIN)) {
+    html = html.replace(
+      "connect-src 'self'",
+      `connect-src 'self'\n      ${API_ORIGIN}`
+    );
+  }
+
+  // Le client API doit être chargé avant app.js pour remplacer la recherche
+  // historique avant son premier appel réseau.
+  if (!html.includes('./js/ytmusic-api.js')) {
+    html = html.replace(
+      '<script src="./js/app.js"></script>',
+      '<script src="./js/ytmusic-api.js"></script>\n  <script src="./js/app.js"></script>'
+    );
+  }
+
+  const headers = new Headers(response.headers);
+  headers.set('content-type', 'text/html; charset=utf-8');
+  headers.delete('content-length');
+
+  return new Response(html, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
 
 async function staleWhileRevalidate(request) {
   const cache = await caches.open(CACHE_NAME);
   const cached = await cache.match(request);
 
-  // Lancer la mise à jour réseau en arrière-plan
   const fetchPromise = fetch(request).then(response => {
     if (response && response.status === 200) {
       cache.put(request, response.clone());
@@ -77,6 +117,5 @@ async function staleWhileRevalidate(request) {
     return response;
   }).catch(() => null);
 
-  // Retourner le cache immédiatement s'il existe, sinon attendre le réseau
   return cached || fetchPromise;
 }
