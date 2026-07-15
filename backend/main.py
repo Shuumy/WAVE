@@ -1,11 +1,8 @@
 """Backend WAVE : recherche YouTube Music et téléchargement audio personnel.
 
-La recherche utilise ytmusicapi. Le téléchargement utilise yt-dlp et renvoie le
-meilleur flux audio disponible sans conversion FFmpeg, afin de rester léger sur
-un petit service Render.
-
-Les cookies YouTube sont lus uniquement depuis un Secret File Render. Le fichier
-secret n'est jamais renvoyé au client, journalisé ou stocké dans le dépôt.
+La recherche utilise ytmusicapi. Le téléchargement utilise yt-dlp avec un
+fournisseur local de PO Token bgutil. Les cookies YouTube sont lus uniquement
+depuis un Secret File Render et ne sont jamais renvoyés ou journalisés.
 """
 
 from __future__ import annotations
@@ -14,10 +11,12 @@ import mimetypes
 import os
 import re
 import shutil
+import socket
 import tempfile
 import threading
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.background import BackgroundTasks
@@ -27,11 +26,12 @@ from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 from ytmusicapi import YTMusic
 
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.3.0"
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
 MAX_COOKIE_BYTES = 1024 * 1024
 DOWNLOAD_SEMAPHORE = threading.BoundedSemaphore(value=1)
+POT_PROVIDER_URL = os.getenv("POT_PROVIDER_URL", "http://127.0.0.1:4416").rstrip("/")
 DEFAULT_FRONTEND_ORIGINS = (
     "https://shuumy.github.io",
     "http://localhost:8000",
@@ -77,12 +77,7 @@ def _cookie_source() -> Path | None:
 
 
 def _private_cookie_copy(temp_dir: Path) -> Path | None:
-    """Copie le secret dans le dossier temporaire pour que yt-dlp puisse l'utiliser.
-
-    Render peut monter les Secret Files en lecture seule. yt-dlp pouvant mettre à
-    jour le cookie jar, une copie privée et éphémère évite toute écriture sur le
-    secret original. Elle est supprimée avec le dossier du téléchargement.
-    """
+    """Crée une copie privée et éphémère du Secret File pour yt-dlp."""
 
     source = _cookie_source()
     if source is None:
@@ -95,6 +90,19 @@ def _private_cookie_copy(temp_dir: Path) -> Path | None:
     except OSError:
         pass
     return destination
+
+
+def _pot_provider_ready(timeout: float = 0.35) -> bool:
+    """Vérifie seulement que le serveur local bgutil écoute, sans exposer de secret."""
+
+    parsed = urlparse(POT_PROVIDER_URL)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 4416
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 app = FastAPI(
@@ -131,19 +139,12 @@ async def security_headers(request: Request, call_next):
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(_request: Request, _error: Exception) -> JSONResponse:
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Erreur interne du service WAVE."},
-    )
+    return JSONResponse(status_code=500, content={"detail": "Erreur interne du service WAVE."})
 
 
 @app.get("/", tags=["État"])
 def root() -> dict[str, str]:
-    return {
-        "name": "WAVE API",
-        "status": "online",
-        "version": APP_VERSION,
-    }
+    return {"name": "WAVE API", "status": "online", "version": APP_VERSION}
 
 
 @app.get("/api/health", tags=["État"])
@@ -152,6 +153,7 @@ def health() -> dict[str, str]:
         "status": "ok",
         "version": APP_VERSION,
         "youtubeCookies": "configured" if _cookie_source() else "missing",
+        "poTokenProvider": "ready" if _pot_provider_ready() else "unavailable",
     }
 
 
@@ -163,12 +165,12 @@ def _artist_names(item: dict[str, Any]) -> list[str]:
 def _normalize_song(item: dict[str, Any]) -> dict[str, Any]:
     thumbnails = item.get("thumbnails") or []
     album = item.get("album") or {}
-
+    artists = _artist_names(item)
     return {
         "videoId": item.get("videoId"),
         "title": item.get("title") or "Titre inconnu",
-        "artists": _artist_names(item),
-        "artist": ", ".join(_artist_names(item)) or "Artiste inconnu",
+        "artists": artists,
+        "artist": ", ".join(artists) or "Artiste inconnu",
         "album": album.get("name") if isinstance(album, dict) else None,
         "duration": item.get("duration"),
         "durationSeconds": item.get("duration_seconds"),
@@ -205,12 +207,7 @@ def search_songs(
         for item in raw_results
         if item.get("videoId") and item.get("title")
     ]
-
-    return {
-        "query": cleaned_query,
-        "count": len(results),
-        "results": results,
-    }
+    return {"query": cleaned_query, "count": len(results), "results": results}
 
 
 def _safe_filename(title: str, extension: str) -> str:
@@ -220,27 +217,34 @@ def _safe_filename(title: str, extension: str) -> str:
 
 
 def _download_audio(video_id: str) -> tuple[Path, Path, dict[str, Any]]:
+    if not _pot_provider_ready():
+        raise RuntimeError("Le fournisseur de PO Token n'est pas disponible.")
+
     temp_dir = Path(tempfile.mkdtemp(prefix="wave-audio-"))
     output_template = str(temp_dir / "%(id)s.%(ext)s")
     source_url = f"https://www.youtube.com/watch?v={video_id}"
     cookie_copy = _private_cookie_copy(temp_dir)
 
     options: dict[str, Any] = {
-        # Laisse yt-dlp choisir le meilleur flux audio réellement disponible.
-        # Les anciens clients forcés (android_vr/web_safari) pouvaient exposer
-        # seulement des formats inexploitables et provoquer "Requested format
-        # is not available" même avec des cookies valides.
         "format": "bestaudio/best",
         "outtmpl": output_template,
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
         "restrictfilenames": True,
-        "socket_timeout": 25,
+        "socket_timeout": 30,
         "retries": 3,
         "fragment_retries": 3,
         "max_filesize": MAX_DOWNLOAD_BYTES,
         "overwrites": True,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["mweb"],
+            },
+            "youtubepot-bgutilhttp": {
+                "base_url": [POT_PROVIDER_URL],
+            },
+        },
     }
     if cookie_copy is not None:
         options["cookiefile"] = str(cookie_copy)
@@ -266,7 +270,6 @@ def _download_audio(video_id: str) -> tuple[Path, Path, dict[str, Any]]:
     if not file_path.is_file() or file_path.stat().st_size < 10_000:
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise RuntimeError("Le flux audio téléchargé est vide.")
-
     if file_path.stat().st_size > MAX_DOWNLOAD_BYTES:
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise RuntimeError("Le fichier audio dépasse la limite de 100 Mo.")
@@ -275,19 +278,11 @@ def _download_audio(video_id: str) -> tuple[Path, Path, dict[str, Any]]:
 
 
 @app.get("/api/download/{video_id}", tags=["Téléchargement"])
-def download_audio(
-    video_id: str,
-    background_tasks: BackgroundTasks,
-) -> FileResponse:
-    """Télécharge le meilleur flux audio disponible pour un identifiant YouTube.
-
-    Aucun MP3 n'est fabriqué : le fichier reste en M4A, WebM ou autre format audio
-    fourni par YouTube. Cela évite FFmpeg et réduit l'utilisation CPU/mémoire.
-    """
+def download_audio(video_id: str, background_tasks: BackgroundTasks) -> FileResponse:
+    """Télécharge le meilleur flux audio disponible pour un identifiant YouTube."""
 
     if not VIDEO_ID_RE.fullmatch(video_id):
         raise HTTPException(status_code=400, detail="Identifiant vidéo invalide.")
-
     if not DOWNLOAD_SEMAPHORE.acquire(blocking=False):
         raise HTTPException(
             status_code=429,
@@ -299,15 +294,11 @@ def download_audio(
     except DownloadError as error:
         message = str(error).lower()
         if "sign in to confirm" in message or "not a bot" in message:
-            detail = (
-                "YouTube refuse la session actuelle. Vérifie que le Secret File "
-                "Render s'appelle cookies.txt et que /api/health indique configured."
-            )
+            detail = "YouTube refuse la session actuelle : réexporte les cookies YouTube."
         elif "requested format is not available" in message:
-            detail = (
-                "YouTube n'a fourni aucun flux audio compatible pour cette vidéo. "
-                "Réessaie après le prochain déploiement ou avec une autre vidéo."
-            )
+            detail = "YouTube n'a fourni aucun flux compatible, même avec le PO Token."
+        elif "po token" in message or "pot" in message:
+            detail = "Le fournisseur de PO Token n'a pas pu produire un jeton valide."
         elif "cookies" in message:
             detail = "Les cookies YouTube sont absents, invalides ou expirés."
         else:
@@ -330,5 +321,5 @@ def download_audio(
         filename=filename,
         background=background_tasks,
     )
-    response.headers["X-WAVE-Provider"] = "yt-dlp"
+    response.headers["X-WAVE-Provider"] = "yt-dlp+bgutil"
     return response
