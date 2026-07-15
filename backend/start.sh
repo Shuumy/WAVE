@@ -38,4 +38,4 @@ print("[WAVE] Le PO Token Provider n'a pas démarré.", file=sys.stderr, flush=T
 sys.exit(1)
 PY
 
-exec uvicorn main:app --host 0.0.0.0 --port "${PORT:-10000}" --workers 1
+exec uvicorn diagnostic_app:app --host 0.0.0.0 --port "${PORT:-10000}" --workers 1
