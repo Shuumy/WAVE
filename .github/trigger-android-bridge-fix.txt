@@ -1,0 +1,1 @@
+Déclenchement temporaire du correctif de chargement initial du pont Samsung.
