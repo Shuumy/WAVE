@@ -1,5 +1,5 @@
 // WAVE service worker
-const CACHE_NAME = 'wave-v11';
+const CACHE_NAME = 'wave-v12';
 const API_ORIGIN = 'https://wave-jc53.onrender.com';
 const ASSETS = [
   './',
@@ -9,7 +9,7 @@ const ASSETS = [
   './js/tracks.js',
   './js/player.js',
   './js/ytmusic-api.js',
-  './js/piped-router.js',
+  './js/download-router.js',
   './js/app.js',
   './manifest.json',
 ];
@@ -80,15 +80,18 @@ async function loadAppShell(request) {
     );
   }
 
+  // Retire une éventuelle ancienne injection avant d'ajouter le routeur actuel.
+  html = html.replace(/\s*<script src="\.\/js\/piped-router\.js"><\/script>/g, '');
+
   if (!html.includes('./js/ytmusic-api.js')) {
     html = html.replace(
       '<script src="./js/app.js"></script>',
-      '<script src="./js/ytmusic-api.js"></script>\n  <script src="./js/piped-router.js"></script>\n  <script src="./js/app.js"></script>'
+      '<script src="./js/ytmusic-api.js"></script>\n  <script src="./js/download-router.js"></script>\n  <script src="./js/app.js"></script>'
     );
-  } else if (!html.includes('./js/piped-router.js')) {
+  } else if (!html.includes('./js/download-router.js')) {
     html = html.replace(
       '<script src="./js/app.js"></script>',
-      '<script src="./js/piped-router.js"></script>\n  <script src="./js/app.js"></script>'
+      '<script src="./js/download-router.js"></script>\n  <script src="./js/app.js"></script>'
     );
   }
 
