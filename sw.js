@@ -1,5 +1,5 @@
 // WAVE service worker
-const CACHE_NAME = 'wave-v10';
+const CACHE_NAME = 'wave-v11';
 const API_ORIGIN = 'https://wave-jc53.onrender.com';
 const ASSETS = [
   './',
@@ -48,7 +48,7 @@ self.addEventListener('fetch', event => {
   }
 
   if (ASSETS.some(asset => url.pathname.endsWith(asset.replace('./', '/')))) {
-    event.respondWith(staleWhileRevalidate(request));
+    event.respondWith(networkFirstAsset(request));
     return;
   }
 
@@ -103,16 +103,15 @@ async function loadAppShell(request) {
   });
 }
 
-async function staleWhileRevalidate(request) {
+async function networkFirstAsset(request) {
   const cache = await caches.open(CACHE_NAME);
-  const cached = await cache.match(request);
-
-  const fetchPromise = fetch(request).then(response => {
+  try {
+    const response = await fetch(request, { cache: 'no-cache' });
     if (response && response.status === 200) {
-      cache.put(request, response.clone());
+      await cache.put(request, response.clone());
     }
     return response;
-  }).catch(() => null);
-
-  return cached || fetchPromise;
+  } catch {
+    return (await cache.match(request)) || new Response('', { status: 503 });
+  }
 }
