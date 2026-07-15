@@ -1,9 +1,9 @@
 /*
- * WAVE — Pont de téléchargement yt-dlp
+ * WAVE — Routeur de téléchargement yt-dlp
  *
- * L'application historique appelle encore une route Piped `/streams/{videoId}`.
- * Ce module la remplace par le backend WAVE et corrige aussi les libellés visibles
- * afin que l'interface indique clairement le véritable fournisseur utilisé.
+ * L'interface historique demande des métadonnées de flux avant de télécharger.
+ * Ce module conserve ce contrat interne, mais toutes les données et le fichier
+ * audio proviennent exclusivement du backend WAVE.
  */
 (() => {
   'use strict';
@@ -11,7 +11,7 @@
   const API_BASE_URL = window.WAVE_API_BASE_URL || 'https://wave-jc53.onrender.com';
   const nativeFetch = window.fetch.bind(window);
 
-  function parseLegacyStreamsRequest(resource) {
+  function parseLegacyStreamRequest(resource) {
     try {
       const raw = typeof resource === 'string' ? resource : resource?.url;
       const url = new URL(raw, window.location.href);
@@ -28,13 +28,13 @@
       const url = new URL(raw, window.location.href);
       if (url.origin !== new URL(API_BASE_URL).origin) return null;
       const match = url.pathname.match(/\/api\/download\/([A-Za-z0-9_-]{11})$/);
-      return match ? { videoId: match[1], url } : null;
+      return match ? { videoId: match[1] } : null;
     } catch {
       return null;
     }
   }
 
-  function buildCompatibilityPayload(videoId) {
+  function compatibilityPayload(videoId) {
     const downloadUrl = new URL(`/api/download/${encodeURIComponent(videoId)}`, API_BASE_URL);
     return {
       title: '',
@@ -52,26 +52,28 @@
     };
   }
 
-  function replaceLegacyLabels(root = document.body) {
+  function replaceOldProviderLabels(root = document.body) {
     if (!root) return;
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     const nodes = [];
     while (walker.nextNode()) nodes.push(walker.currentNode);
+
     for (const node of nodes) {
       const value = node.nodeValue || '';
-      if (!value.includes('Piped') && !value.includes('Invidious')) continue;
+      if (!/Piped|Invidious/i.test(value)) continue;
       node.nodeValue = value
-        .replaceAll('Piped indisponible, essai Invidious...', 'WAVE yt-dlp indisponible')
-        .replaceAll('Piped', 'WAVE yt-dlp')
-        .replaceAll('Invidious', 'secours');
+        .replace(/Piped indisponible, essai Invidious\.\.\./gi, 'WAVE yt-dlp indisponible')
+        .replace(/Recherche via Piped/gi, 'Préparation via WAVE yt-dlp')
+        .replace(/Piped/gi, 'WAVE yt-dlp')
+        .replace(/Invidious/gi, 'service de secours');
     }
   }
 
-  window.fetch = async function waveYtDlpFetch(resource, options) {
-    const legacy = parseLegacyStreamsRequest(resource);
+  window.fetch = async function waveDownloadFetch(resource, options) {
+    const legacy = parseLegacyStreamRequest(resource);
     if (legacy) {
-      console.info(`[WAVE/yt-dlp] Flux préparé pour ${legacy.videoId}`);
-      return new Response(JSON.stringify(buildCompatibilityPayload(legacy.videoId)), {
+      console.info(`[WAVE/yt-dlp] Préparation du téléchargement ${legacy.videoId}`);
+      return new Response(JSON.stringify(compatibilityPayload(legacy.videoId)), {
         status: 200,
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
@@ -103,19 +105,22 @@
       throw new Error(detail);
     }
 
-    console.info(`[WAVE/yt-dlp] Téléchargement démarré pour ${download.videoId}`);
+    console.info(`[WAVE/yt-dlp] Téléchargement reçu pour ${download.videoId}`);
     return response;
   };
 
-  const observer = new MutationObserver(() => replaceLegacyLabels());
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      replaceLegacyLabels();
+  const observer = new MutationObserver(() => replaceOldProviderLabels());
+  const start = () => {
+    replaceOldProviderLabels();
+    if (document.body) {
       observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-    }, { once: true });
+    }
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
   } else {
-    replaceLegacyLabels();
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    start();
   }
 
   window.WAVE_DOWNLOAD_PROVIDER = 'yt-dlp';
