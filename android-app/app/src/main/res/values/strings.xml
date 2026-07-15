@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">WAVE</string>
+    <string name="unlock_title">Déverrouiller WAVE</string>
+    <string name="unlock_subtitle">Utilise ton empreinte, ton visage ou le code du Samsung.</string>
+    <string name="device_lock_required_title">Verrouillage requis</string>
+    <string name="device_lock_required_message">Configure d’abord une empreinte, un visage, un PIN, un schéma ou un mot de passe dans les paramètres Android.</string>
+    <string name="open_settings">Ouvrir les paramètres</string>
+    <string name="close_app">Fermer</string>
+    <string name="offline_html" formatted="false"><![CDATA[
+        <!doctype html><html lang="fr"><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+        body{margin:0;background:#0a0a0a;color:#fff;font-family:sans-serif;display:grid;place-items:center;min-height:100vh;text-align:center;padding:24px;box-sizing:border-box}
+        h1{color:#ffcc00}p{color:#b8b8b8;line-height:1.5}button{border:0;border-radius:14px;padding:14px 20px;background:#ffcc00;color:#111;font-weight:700}
+        </style></head><body><main><h1>WAVE hors ligne</h1><p>Vérifie ta connexion Internet, puis relance l’application.</p><button onclick="location.href='https://shuumy.github.io/WAVE/'">Réessayer</button></main></body></html>
+    ]]></string>
+</resources>
