@@ -10,5 +10,3 @@ services:
     envVars:
       - key: FRONTEND_ORIGINS
         value: https://shuumy.github.io
-      - key: POT_PROVIDER_URL
-        value: http://127.0.0.1:4416

@@ -1,0 +1,39 @@
+name: Samsung bridge checks
+
+on:
+  pull_request:
+    paths:
+      - 'android/**'
+      - 'js/samsung-bridge.js'
+      - 'sw.js'
+      - '.github/workflows/samsung-bridge.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - 'js/samsung-bridge.js'
+      - 'sw.js'
+      - '.github/workflows/samsung-bridge.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check Python syntax
+        run: python -m py_compile android/wave_bridge.py
+      - name: Check JavaScript syntax
+        run: |
+          node --check js/samsung-bridge.js
+          node --check sw.js
+      - name: Check shell syntax
+        run: bash -n android/install-wave.sh
