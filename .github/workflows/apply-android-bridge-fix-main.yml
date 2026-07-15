@@ -50,21 +50,6 @@ jobs:
           if count != 1:
               raise SystemExit('Nom du cache introuvable')
           sw_path.write_text(sw, encoding='utf-8')
-
-          checks_path = Path('.github/workflows/samsung-bridge.yml')
-          checks = checks_path.read_text(encoding='utf-8')
-          if "      - 'index.html'" not in checks:
-              checks = checks.replace(
-                  "      - 'js/samsung-bridge.js'\n      - 'sw.js'",
-                  "      - 'js/samsung-bridge.js'\n      - 'index.html'\n      - 'sw.js'",
-              )
-          commands = "          grep -q 'http://127.0.0.1:8765' index.html\n          grep -q './js/samsung-bridge.js' index.html"
-          if commands not in checks:
-              marker = "          node --check sw.js"
-              if marker not in checks:
-                  raise SystemExit('Bloc de vérification introuvable')
-              checks = checks.replace(marker, f"{marker}\n{commands}", 1)
-          checks_path.write_text(checks, encoding='utf-8')
           PY
 
       - name: Vérifier
@@ -84,7 +69,7 @@ jobs:
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add index.html sw.js .github/workflows/samsung-bridge.yml
+          git add index.html sw.js
           git commit -m 'fix: charger le pont Samsung dès le premier écran Android'
           git push origin HEAD:main
 
