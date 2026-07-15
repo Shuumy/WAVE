@@ -42,7 +42,7 @@
       blob:
       https:;
     frame-src https://www.youtube.com https://www.youtube-nocookie.com;
-    connect-src 'self' https://wave-docker.onrender.com https://fonts.googleapis.com;
+    connect-src 'self' https://wave-docker.onrender.com https://fonts.googleapis.com http://127.0.0.1:8765 http://localhost:8765;
     worker-src 'self';
     manifest-src 'self';
   ">
@@ -446,6 +446,7 @@
   <script src="./js/db.js"></script>
   <script src="./js/tracks.js"></script>
   <script src="./js/player.js"></script>
+  <script src="./js/samsung-bridge.js"></script>
   <script src="./js/app.js"></script>
 </body>
 </html>
