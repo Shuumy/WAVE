@@ -9,7 +9,7 @@
 (() => {
   'use strict';
 
-  const API_BASE_URL = 'https://wave-jc53.onrender.com';
+  const API_BASE_URL = 'https://wave-docker.onrender.com';
   const nativeFetch = window.fetch.bind(window);
 
   function setStatus(state, text) {
