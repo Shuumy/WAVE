@@ -1328,7 +1328,7 @@
   fileInput.addEventListener('change', () => { if(fileInput.files.length) { importFiles(fileInput.files); fileInput.value=''; } });
   importDropzone.addEventListener('click', (e) => { if(!e.target.closest('.import-btn') && e.target.tagName!=='LABEL') fileInput.click(); });
 
-  // ===== Import YouTube (Piped → Invidious) =====
+  // ===== Import YouTube via WAVE API =====
   const ytImportInput    = $('#ytImportInput');
   const ytImportBtn      = $('#ytImportBtn');
   const ytPreviewCard    = $('#ytPreviewCard');
@@ -1342,11 +1342,6 @@
   const ytImportText     = $('#ytImportText');
 
   let _ytPreviewData = null;
-
-  function _fmtDur(s) {
-    if (!s || s <= 0) return '';
-    return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
-  }
 
   function extractYouTubeVideoId(input) {
     input = (input || '').trim();
@@ -1364,175 +1359,89 @@
     return m ? m[1] : null;
   }
 
+  function filenameFromDisposition(header, fallback) {
+    if (!header) return fallback;
+    const utf = header.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utf) { try { return decodeURIComponent(utf[1]); } catch {} }
+    const plain = header.match(/filename="?([^";]+)"?/i);
+    return plain ? plain[1] : fallback;
+  }
 
-  // Étape 1 : analyser l'URL → afficher la preview
+  async function downloadWaveAudio(videoId) {
+    const response = await fetch(`${WAVE_API_BASE_URL}/api/download/${encodeURIComponent(videoId)}`, {
+      method: 'GET', cache: 'no-store', credentials: 'omit',
+      headers: { Accept: 'application/octet-stream,audio/*,video/*,*/*' },
+    });
+    if (!response.ok) {
+      let message = `WAVE API indisponible (${response.status})`;
+      try { const payload = await response.json(); if (payload?.detail) message = payload.detail; } catch {}
+      throw new Error(message);
+    }
+    const blob = await response.blob();
+    if (!blob || blob.size < 10000) throw new Error('Le fichier reçu est vide.');
+    const mimeType = response.headers.get('content-type') || blob.type || 'application/octet-stream';
+    const fallback = `${videoId}.${mimeType.includes('mp4') ? 'm4a' : mimeType.includes('webm') ? 'webm' : 'audio'}`;
+    const fileName = filenameFromDisposition(response.headers.get('content-disposition'), fallback);
+    return { blob, mimeType, fileName };
+  }
+
   async function analyzeYouTubeUrl() {
     const videoId = extractYouTubeVideoId(ytImportInput.value);
     if (!videoId) { showToast('URL YouTube invalide'); return; }
-    _ytPreviewData = null;
-    ytImportBtn.disabled = true;
+    _ytPreviewData = { videoId, title: `YouTube ${videoId}`, artist: '', duration: 0, thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` };
     ytPreviewCard.hidden = false;
-    ytPreviewThumb.src = `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/hqdefault.jpg`;
-    ytPreviewTitleEl.textContent = 'Analyse...';
-    ytPreviewMetaEl.textContent = '';
-    ytPreviewSaveBtn.hidden = true;
-    ytPreviewDlBtn.hidden = true;
-    ytPreviewSaveBtn.className = 'yt-preview-save-btn';
-    ytPreviewDlBtn.className = 'yt-preview-dl-btn';
-    ytImportProgress.hidden = true;
-    let rawTitle = '', uploader = '', duration = 0, thumbnailUrl = '';
-    for (const inst of PIPED_INSTANCES) {
-      try {
-        const r = await fetchWithTimeout(`${inst}/streams/${videoId}`, { cache:'no-cache' }, 10000);
-        if (!r.ok) continue;
-        const d = await r.json();
-        if (d.error) continue;
-        rawTitle = d.title || ''; uploader = d.uploader || '';
-        duration = d.duration || 0; thumbnailUrl = sanitizeURL(d.thumbnailUrl || '') || '';
-        break;
-      } catch {}
-    }
-    // Fallback Invidious pour les métadonnées si Piped a échoué
-    if (!rawTitle) {
-      const invs = await getInvidiousInstances();
-      for (const inst of invs) {
-        try {
-          const r = await fetchWithTimeout(`${inst}/api/v1/videos/${videoId}?fields=title,author,lengthSeconds,videoThumbnails`, {}, 10000);
-          if (!r.ok) continue;
-          const d = await r.json();
-          if (!d.title) continue;
-          rawTitle = d.title || ''; uploader = d.author || '';
-          duration = d.lengthSeconds || 0;
-          const thumb = d.videoThumbnails?.find(t => t.quality === 'high') || d.videoThumbnails?.[0];
-          thumbnailUrl = sanitizeURL(thumb?.url || '') || '';
-          break;
-        } catch {}
-      }
-    }
-    ytImportBtn.disabled = false;
-    let displayTitle = rawTitle || 'Titre inconnu', displayArtist = uploader || '';
-    const dm = rawTitle.match(/^(.+?)\s*[-–—]\s*(.+)$/);
-    if (dm) { displayArtist = dm[1].trim(); displayTitle = dm[2].trim(); }
-    ytPreviewTitleEl.textContent = displayTitle;
-    ytPreviewMetaEl.textContent = displayArtist + (_fmtDur(duration) ? ' · ' + _fmtDur(duration) : '');
-    const alreadySaved = userTracks.some(t => t.youtubeId === videoId);
-    ytPreviewSaveBtn.innerHTML = alreadySaved
-      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg> Déjà dans la bibliothèque'
-      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg> Sauvegarder dans la bibliothèque';
-    ytPreviewSaveBtn.disabled = alreadySaved;
-    if (alreadySaved) ytPreviewSaveBtn.classList.add('saved');
-    ytPreviewDlBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Télécharger sur l\'appareil';
-    ytPreviewDlBtn.disabled = false;
+    ytPreviewThumb.src = _ytPreviewData.thumbnailUrl;
+    ytPreviewTitleEl.textContent = _ytPreviewData.title;
+    ytPreviewMetaEl.textContent = 'Téléchargement via WAVE API';
     ytPreviewSaveBtn.hidden = false;
     ytPreviewDlBtn.hidden = false;
-    _ytPreviewData = { videoId, title: displayTitle, artist: displayArtist, duration, thumbnailUrl };
+    ytPreviewSaveBtn.disabled = userTracks.some(t => t.youtubeId === videoId);
+    ytPreviewDlBtn.disabled = false;
   }
 
-  // Étape 2a : sauvegarder dans la bibliothèque (Piped → Invidious)
   async function saveFromYouTube() {
     if (!_ytPreviewData) return;
-    const { videoId, title, artist, duration, thumbnailUrl } = _ytPreviewData;
+    const { videoId, title, artist, thumbnailUrl } = _ytPreviewData;
     ytPreviewSaveBtn.disabled = true; ytPreviewDlBtn.disabled = true;
-    ytImportProgress.hidden = false;
-    ytImportFill.style.width = '5%'; ytImportText.textContent = 'Connexion...';
+    ytImportProgress.hidden = false; ytImportFill.style.width = '20%'; ytImportText.textContent = 'WAVE API...';
     try {
-      let blob, mimeType, pipedTitle, pipedUploader, pipedDuration;
-      // 1. Piped
-      try {
-        ytImportFill.style.width = '15%'; ytImportText.textContent = 'Piped...';
-        const res = await downloadFromPiped(videoId, (c,t) => {
-          ytImportFill.style.width = `${15 + Math.round(c/t*55)}%`;
-          ytImportText.textContent = `Piped ${c}/${t}...`;
-        });
-        ({ blob, mimeType } = res);
-        pipedTitle = res.pipedTitle; pipedUploader = res.pipedUploader; pipedDuration = res.pipedDuration;
-      } catch {
-        // 2. Invidious
-        ytImportFill.style.width = '72%'; ytImportText.textContent = 'Invidious...';
-        const res = await downloadFromInvidious(videoId, (c,t) => {
-          ytImportFill.style.width = `${72 + Math.round(c/t*15)}%`;
-          ytImportText.textContent = `Invidious ${c}/${t}...`;
-        });
-        ({ blob, mimeType } = res);
-        pipedTitle = res.pipedTitle; pipedUploader = res.pipedUploader; pipedDuration = res.pipedDuration;
-      }
-      ytImportFill.style.width = '88%'; ytImportText.textContent = 'Validation...';
-      const { duration: audioDuration } = await validateAudio(blob);
-      const mime = (mimeType || '').split(';')[0];
-      const ext = mime.includes('opus') ? 'opus' : mime.includes('mp4') ? 'm4a' : mime.includes('webm') ? 'webm' : 'mp3';
-      const finalTitle = title || pipedTitle || 'Titre inconnu';
-      const finalArtist = artist || pipedUploader || 'Artiste inconnu';
-      let coverArt = null;
-      const thumb = thumbnailUrl || '';
-      if (thumb) {
-        try {
-          const tr = await fetchWithTimeout(thumb, {}, 10000);
-          if (tr.ok && (tr.headers.get('content-type')||'').startsWith('image/')) {
-            const tb = await tr.blob();
-            coverArt = await new Promise(r => { const rd = new FileReader(); rd.onload=()=>r(rd.result); rd.onerror=()=>r(null); rd.readAsDataURL(tb); });
-            if (coverArt && !coverArt.startsWith('data:image/')) coverArt = null;
-          }
-        } catch {}
-      }
-      const meta = { id:'yt-'+videoId+'-'+Date.now(), title:finalTitle, artist:finalArtist, album:'', duration:Math.round(audioDuration||pipedDuration||duration||0), genre:'', color:randColor(), userImported:true, fileName:`${videoId}.${ext}`, importedAt:Date.now(), coverArt, youtubeId:videoId };
+      const { blob, mimeType, fileName } = await downloadWaveAudio(videoId);
+      ytImportFill.style.width = '80%'; ytImportText.textContent = 'Validation...';
+      const { duration } = await validateAudio(blob);
+      const ext = fileName.includes('.') ? fileName.split('.').pop() : (mimeType.includes('mp4') ? 'm4a' : 'webm');
+      const meta = {
+        id: `yt-${videoId}-${Date.now()}`, title, artist: artist || 'Artiste inconnu', album: '',
+        duration: Math.round(duration || 0), genre: '', color: randColor(), userImported: true,
+        fileName: `${videoId}.${ext}`, importedAt: Date.now(), coverArt: thumbnailUrl, youtubeId: videoId,
+      };
       await DB.saveUserTrack(meta, blob); userTracks.push(meta);
-      ytImportFill.style.width = '100%'; ytImportText.textContent = `"${meta.title}" ajouté à la bibliothèque`;
-      ytPreviewSaveBtn.classList.add('saved');
-      ytPreviewSaveBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg> Sauvegardé';
-      ytImportInput.value = ''; _ytPreviewData = null;
+      ytImportFill.style.width = '100%'; ytImportText.textContent = 'Ajouté à la bibliothèque';
       showToast(`"${meta.title}" sauvegardé`); refreshAllViews();
-      setTimeout(() => { ytImportProgress.hidden = true; ytImportFill.style.width = '0%'; }, 3000);
     } catch (err) {
-      ytImportFill.style.width = '0%'; ytImportText.textContent = 'Erreur : ' + (err.message||'Échec').slice(0,80);
-      ytPreviewSaveBtn.disabled = false;
-      showToast('Erreur : ' + (err.message||'Échec').slice(0,60));
-    } finally {
-      ytPreviewDlBtn.disabled = false;
-    }
+      ytImportFill.style.width = '0%'; ytImportText.textContent = `Erreur : ${(err.message || 'Échec').slice(0, 100)}`;
+      ytPreviewSaveBtn.disabled = false; showToast(`Erreur : ${(err.message || 'Échec').slice(0, 70)}`);
+    } finally { ytPreviewDlBtn.disabled = false; }
   }
 
-  // Étape 2b : télécharger directement sur l'appareil (Piped → Invidious)
   async function downloadToDevice() {
     if (!_ytPreviewData) return;
     const { videoId, title } = _ytPreviewData;
     ytPreviewDlBtn.disabled = true; ytPreviewSaveBtn.disabled = true;
-    ytImportProgress.hidden = false;
-    ytImportFill.style.width = '10%'; ytImportText.textContent = 'Téléchargement...';
+    ytImportProgress.hidden = false; ytImportFill.style.width = '20%'; ytImportText.textContent = 'WAVE API...';
     try {
-      let blob, mimeType;
-      try {
-        ytImportText.textContent = 'Piped...'; ytImportFill.style.width = '20%';
-        const res = await downloadFromPiped(videoId);
-        blob = res.blob; mimeType = res.mimeType;
-      } catch {
-        ytImportText.textContent = 'Invidious...'; ytImportFill.style.width = '55%';
-        const res = await downloadFromInvidious(videoId);
-        blob = res.blob; mimeType = res.mimeType;
-      }
-      ytImportFill.style.width = '95%'; ytImportText.textContent = 'Préparation du fichier...';
-      const mime = (mimeType||'').split(';')[0];
-      const ext = mime.includes('opus') ? 'opus' : mime.includes('mp4') ? 'm4a' : mime.includes('webm') ? 'webm' : 'mp3';
+      const { blob, fileName } = await downloadWaveAudio(videoId);
       const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = blobUrl; a.download = `${title}.${ext}`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      const a = document.createElement('a'); a.href = blobUrl; a.download = fileName || title; document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
-      ytImportFill.style.width = '100%'; ytImportText.textContent = 'Téléchargement lancé !';
-      ytPreviewDlBtn.classList.add('done');
-      ytPreviewDlBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg> Téléchargé';
-      showToast('Téléchargement lancé');
-      setTimeout(() => { ytImportProgress.hidden = true; ytImportFill.style.width = '0%'; }, 3000);
+      ytImportFill.style.width = '100%'; ytImportText.textContent = 'Téléchargement lancé'; showToast('Téléchargement lancé');
     } catch (err) {
-      ytImportFill.style.width = '0%'; ytImportText.textContent = 'Erreur : ' + (err.message||'Échec').slice(0,80);
-      ytPreviewDlBtn.disabled = false;
-      showToast('Erreur : ' + (err.message||'Échec').slice(0,60));
-    } finally {
-      ytPreviewSaveBtn.disabled = false;
-    }
+      ytImportFill.style.width = '0%'; ytImportText.textContent = `Erreur : ${(err.message || 'Échec').slice(0, 100)}`;
+      showToast(`Erreur : ${(err.message || 'Échec').slice(0, 70)}`);
+    } finally { ytPreviewDlBtn.disabled = false; ytPreviewSaveBtn.disabled = false; }
   }
 
   ytImportBtn.addEventListener('click', analyzeYouTubeUrl);
-  ytImportInput.addEventListener('keydown', (e) => { if (e.key==='Enter') { e.preventDefault(); analyzeYouTubeUrl(); } });
+  ytImportInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); analyzeYouTubeUrl(); } });
   ytImportInput.addEventListener('input', () => { if (!ytImportInput.value.trim()) { ytPreviewCard.hidden = true; _ytPreviewData = null; } });
   ytPreviewSaveBtn.addEventListener('click', saveFromYouTube);
   ytPreviewDlBtn.addEventListener('click', downloadToDevice);
@@ -1591,104 +1500,32 @@
     }
   });
 
-  // Instances confirmées comme proxifiant leurs streams (URLs sur leur propre domaine).
-  // Les instances qui renvoient des URLs googlevideo.com directes sont inutilisables depuis JS (CORS).
-  // Elles sont gardées en fallback mais on essaie les proxifiantes d'abord.
-  // Source officielle : https://github.com/TeamPiped/documentation/blob/main/content/docs/public-instances/index.md
-  const PIPED_INSTANCES = [
-    'https://api.piped.private.coffee',
-    'https://pipedapi.kavin.rocks',
-    'https://pipedapi-libre.kavin.rocks',
-    'https://pipedapi.adminforge.de',
-    'https://piped-api.privacy.com.de',
-    'https://api.piped.yt',
-    'https://pipedapi.reallyaweso.me',
-    'https://pipedapi.nosebs.ru',
-    'https://pipedapi.darkness.services',
-    'https://pipedapi.orangenet.cc',
-    'https://pipedapi.leptons.xyz',
-    'https://pipedapi.drgns.space',
-    'https://pipedapi.owo.si',
-    'https://piped-api.codespace.cz',
-    'https://pipedapi.ducks.party',
-  ];
-  // Instances qui ont prouvé (dans cette session) qu'elles proxifient leurs streams.
-  // Elles passent en tête de liste lors des appels suivants pour éviter de tester les autres.
-  const _pipedProxyConfirmed = new Set();
-  const INVIDIOUS_FALLBACK = [
-    'https://yewtu.be','https://invidious.nerdvpn.de','https://invidious.privacydev.net',
-    'https://inv.tux.pizza','https://invidious.flokinet.to','https://invidious.fdn.fr',
-    'https://yt.artemislena.eu','https://invidious.private.coffee','https://invidious.protokolla.fi',
-    'https://invidious.privacyredirect.com',
-  ];
-  let cachedInvidious = null;
-  async function getInvidiousInstances() {
-    if (cachedInvidious) return cachedInvidious;
-    try {
-      const r = await fetchWithTimeout('https://api.invidious.io/instances.json?sort_by=health', {}, 5000);
-      if (!r.ok) throw new Error();
-      const data = await r.json();
-      const live = data.filter(([,i]) => i.cors&&i.api&&i.type==='https').map(([d]) => `https://${d}`).slice(0,8);
-      if (live.length) { cachedInvidious = live; return live; }
-    } catch {}
-    return INVIDIOUS_FALLBACK;
-  }
+  const WAVE_API_BASE_URL = 'https://wave-docker.onrender.com';
 
   function getVideoId(item) {
+    if (item.videoId) return item.videoId;
     if (!item.url) return null;
     try { return new URLSearchParams(item.url.split('?')[1]).get('v'); } catch { return null; }
   }
 
   function fetchWithTimeout(url, opts={}, ms=15000) {
-    // ⚠️ SÉCURITÉ : Valider que l'URL cible est bien HTTPS
-    try {
-      const u = new URL(url);
-      if (u.protocol !== 'https:') return Promise.reject(new Error('HTTPS requis'));
-    } catch {
-      return Promise.reject(new Error('URL invalide'));
-    }
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), ms);
-    return fetch(url, { ...opts, signal:ctrl.signal }).finally(() => clearTimeout(t));
+    try { const u = new URL(url); if (u.protocol !== 'https:') return Promise.reject(new Error('HTTPS requis')); }
+    catch { return Promise.reject(new Error('URL invalide')); }
+    const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), ms);
+    return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(t));
   }
 
   async function searchYouTube(q) {
-    // Limiter la longueur de la requête
-    const safeQ = q.slice(0, 200);
-    for (const inst of PIPED_INSTANCES) {
-      try {
-        const r = await fetchWithTimeout(`${inst}/search?q=${encodeURIComponent(safeQ)}&filter=music_songs`, {}, 8000);
-        if (!r.ok) continue;
-        const data = await r.json();
-        const items = (data.items||[]).filter(i => i.type==='stream'&&i.url);
-        if (items.length) return items.slice(0,12);
-      } catch(e) {
-        if (e.name !== 'AbortError') console.error('Piped search error:', inst);
-      }
-    }
-    // Fallback Invidious si tous les serveurs Piped sont indisponibles
-    const invs = await getInvidiousInstances();
-    for (const inst of invs) {
-      try {
-        const r = await fetchWithTimeout(`${inst}/api/v1/search?q=${encodeURIComponent(safeQ)}&type=video`, {}, 8000);
-        if (!r.ok) continue;
-        const data = await r.json();
-        if (!Array.isArray(data) || !data.length) continue;
-        // Transformer le format Invidious vers le format Piped attendu par renderYTResults
-        const items = data.slice(0, 12).filter(v => v.videoId && v.title).map(v => ({
-          type: 'stream',
-          url: `/watch?v=${v.videoId}`,
-          title: v.title || '',
-          uploaderName: v.author || '',
-          thumbnail: (v.videoThumbnails?.find(t => t.quality === 'high') || v.videoThumbnails?.[0])?.url || '',
-          duration: v.lengthSeconds || 0,
-        }));
-        if (items.length) return items;
-      } catch(e) {
-        if (e.name !== 'AbortError') console.error('Invidious search error:', inst);
-      }
-    }
-    throw new Error('Aucun serveur disponible');
+    const url = new URL('/api/search', WAVE_API_BASE_URL);
+    url.searchParams.set('query', q.slice(0, 200)); url.searchParams.set('limit', '12');
+    const response = await fetchWithTimeout(url.toString(), { cache: 'no-store', credentials: 'omit', headers: { Accept: 'application/json' } }, 30000);
+    if (!response.ok) throw new Error(`WAVE API indisponible (${response.status})`);
+    const payload = await response.json();
+    return (payload.results || []).filter(x => x.videoId).map(x => ({
+      type: 'stream', videoId: x.videoId, url: `/watch?v=${x.videoId}`, title: x.title || '',
+      uploaderName: x.artist || (x.artists || []).map(a => a.name || a).filter(Boolean).join(', '),
+      thumbnail: x.thumbnail || x.thumbnails?.at(-1)?.url || '', duration: x.durationSeconds || 0,
+    }));
   }
 
   async function playYouTubeVideo(index) {
@@ -1868,128 +1705,31 @@
   async function saveYouTubeOffline(index, btn) {
     const item = ytSearchResults[index]; if (!item) return;
     const videoId = getVideoId(item);
-    // ⚠️ SÉCURITÉ : Sanitiser thumbnail
-    const thumb = sanitizeURL(item.thumbnail||'') || '';
-    if (userTracks.some(t=>t.youtubeId===videoId)) { showToast('Déjà dans la bibliothèque'); return; }
-    btn.classList.add('yt-saving'); btn.innerHTML='<div class="spinner"></div>'; btn.disabled=true;
+    const thumb = sanitizeURL(item.thumbnail || '') || '';
+    if (!videoId) { showToast('Identifiant YouTube manquant'); return; }
+    if (userTracks.some(t => t.youtubeId === videoId)) { showToast('Déjà dans la bibliothèque'); return; }
+    btn.classList.add('yt-saving'); btn.innerHTML = '<div class="spinner"></div>'; btn.disabled = true;
     try {
-      showToast('Téléchargement en cours...');
-      let res;
-      // 1. Piped
-      try {
-        res = await downloadFromPiped(videoId, (c,t)=>{if(c>1)showToast(`Piped ${c}/${t}...`);});
-      } catch {
-        // 2. Invidious
-        showToast('Piped indisponible, essai Invidious...');
-        res = await downloadFromInvidious(videoId, (c,t)=>showToast(`Invidious ${c}/${t}...`));
-      }
-      const { blob, mimeType, pipedTitle, pipedUploader, pipedDuration } = res;
-      const mime = (mimeType||'').split(';')[0];
-      const ext = mime.includes('opus')?'opus':mime.includes('mp4')?'m4a':mime.includes('webm')?'webm':'mp3';
+      showToast('Téléchargement via WAVE API...');
+      const { blob, mimeType, fileName } = await downloadWaveAudio(videoId);
       const { duration } = await validateAudio(blob);
-      let title = pipedTitle||item.title||'', artist = pipedUploader||item.uploaderName||'';
-      const dm = title.match(/^(.+?)\s*[-–—]\s*(.+)$/);
-      if (dm) { artist=dm[1].trim(); title=dm[2].trim(); }
-
-      // ⚠️ SÉCURITÉ : Valider la cover thumbnail avant stockage
-      let coverArt = null;
-      if (thumb) {
-        try {
-          const tr = await fetchWithTimeout(thumb, {}, 10000);
-          if (tr.ok) {
-            const contentType = tr.headers.get('content-type') || '';
-            if (contentType.startsWith('image/')) {
-              const tb = await tr.blob();
-              coverArt = await new Promise(r=>{const rd=new FileReader();rd.onload=()=>r(rd.result);rd.onerror=()=>r(null);rd.readAsDataURL(tb);});
-              // Vérifier que c'est bien data:image/
-              if (coverArt && !coverArt.startsWith('data:image/')) coverArt = null;
-            }
-          }
-        } catch {}
-      }
-
-      const meta = { id:'yt-'+videoId+'-'+Date.now(), title, artist, album:'', duration:Math.round(duration||pipedDuration||0), genre:'', color:randColor(), userImported:true, fileName:`${videoId}.${ext}`, importedAt:Date.now(), coverArt, youtubeId:videoId };
+      let title = item.title || 'Titre inconnu'; let artist = item.uploaderName || 'Artiste inconnu';
+      const dm = title.match(/^(.+?)\s*[-–—]\s*(.+)$/); if (dm) { artist = dm[1].trim(); title = dm[2].trim(); }
+      const ext = fileName.includes('.') ? fileName.split('.').pop() : (mimeType.includes('mp4') ? 'm4a' : 'webm');
+      const meta = {
+        id: `yt-${videoId}-${Date.now()}`, title, artist, album: '', duration: Math.round(duration || 0),
+        genre: '', color: randColor(), userImported: true, fileName: `${videoId}.${ext}`,
+        importedAt: Date.now(), coverArt: thumb || null, youtubeId: videoId,
+      };
       await DB.saveUserTrack(meta, blob); userTracks.push(meta);
       btn.classList.remove('yt-saving'); btn.classList.add('yt-saved');
-      btn.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+      btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
       showToast(`"${meta.title}" sauvegardé`); refreshAllViews();
-    } catch(err) {
-      btn.classList.remove('yt-saving'); btn.disabled=false;
-      btn.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
-      showToast('Erreur: '+(err.message||'Échec'));
+    } catch (err) {
+      btn.classList.remove('yt-saving'); btn.disabled = false;
+      btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+      showToast(`Erreur : ${(err.message || 'Échec').slice(0, 80)}`);
     }
-  }
-
-  async function downloadFromPiped(videoId, onProgress) {
-    // Les instances confirmées comme proxifiantes passent en tête (plus rapide en session)
-    const ordered = [
-      ...PIPED_INSTANCES.filter(i => _pipedProxyConfirmed.has(i)),
-      ...PIPED_INSTANCES.filter(i => !_pipedProxyConfirmed.has(i)),
-    ];
-    for (let i=0; i<ordered.length; i++) {
-      const inst = ordered[i];
-      try {
-        if(onProgress) onProgress(i+1, ordered.length);
-        const r = await fetchWithTimeout(`${inst}/streams/${videoId}`, { cache:'no-cache' }, 12000);
-        if(!r.ok) continue;
-        const data = await r.json();
-        if(!data.audioStreams?.length) continue;
-        const sorted = data.audioStreams.filter(s=>s.url&&s.mimeType).sort((a,b)=>(b.bitrate||0)-(a.bitrate||0));
-        if(!sorted.length) continue;
-
-        // Vérifier si au moins un stream est proxifié — on compare le hostname, pas toute l'URL,
-        // car les URLs Piped proxy ont souvent googlevideo.com en paramètre de requête (?host=...)
-        const isGoogleCDN = u => { try { return new URL(u).hostname.endsWith('googlevideo.com'); } catch { return true; } };
-        const hasProxied = sorted.some(s => { const u = sanitizeURL(s.url); return u && !isGoogleCDN(u); });
-        if (!hasProxied) continue;
-
-        for (const stream of sorted.slice(0, 3)) {
-          const rawUrl = sanitizeURL(stream.url);
-          if (!rawUrl || isGoogleCDN(rawUrl)) continue;
-
-          try {
-            const ar = await fetchWithTimeout(rawUrl, {}, 45000);
-            if (!ar.ok) continue;
-            const contentType = ar.headers.get('content-type') || '';
-            if (contentType && !contentType.startsWith('audio/') && !contentType.startsWith('video/') && !contentType.includes('octet-stream')) continue;
-            const blob = await ar.blob();
-            if (!blob || blob.size < 10000) continue;
-            _pipedProxyConfirmed.add(inst); // mémoriser pour les prochains appels
-            return { blob, mimeType:stream.mimeType, pipedTitle:data.title, pipedUploader:data.uploader, pipedDuration:data.duration, thumbnailUrl:data.thumbnailUrl||'' };
-          } catch { /* stream suivant */ }
-        }
-      } catch(e) {
-        if (e.name !== 'AbortError') console.error('Piped download error:', inst);
-      }
-    }
-    throw new Error('Piped: aucun serveur disponible');
-  }
-
-  async function downloadFromInvidious(videoId, onProgress) {
-    const invs = await getInvidiousInstances();
-    for (let i=0; i<invs.length; i++) {
-      const inst = invs[i];
-      try {
-        if(onProgress) onProgress(i+1, invs.length);
-        const r = await fetchWithTimeout(`${inst}/api/v1/videos/${videoId}?fields=adaptiveFormats,title,author,lengthSeconds`, {}, 12000);
-        if(!r.ok) continue;
-        const data = await r.json();
-        const fmts = (data.adaptiveFormats||[]).filter(f=>f.type?.startsWith('audio/')&&f.itag).sort((a,b)=>(parseInt(b.bitrate)||0)-(parseInt(a.bitrate)||0));
-        if(!fmts.length) continue;
-        // Essayer jusqu'à 3 formats par instance (du meilleur bitrate au plus bas)
-        for (const fmt of fmts.slice(0, 3)) {
-          try {
-            const url = `${inst}/latest_version?id=${encodeURIComponent(videoId)}&itag=${encodeURIComponent(fmt.itag)}&local=true`;
-            const ar = await fetchWithTimeout(url, {}, 45000); if(!ar.ok) continue;
-            const blob = await ar.blob(); if(!blob||blob.size<10000) continue;
-            return { blob, mimeType:fmt.type.split(';')[0], pipedTitle:data.title, pipedUploader:data.author, pipedDuration:data.lengthSeconds };
-          } catch { /* format suivant */ }
-        }
-      } catch(e) {
-        if (e.name !== 'AbortError') console.error('Invidious download error:', inst);
-      }
-    }
-    throw new Error('Aucun serveur disponible');
   }
 
   ytSearchInput.addEventListener('input', () => {
