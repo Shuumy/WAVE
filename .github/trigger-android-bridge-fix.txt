@@ -1,1 +1,2 @@
 Déclenchement temporaire du correctif de chargement initial du pont Samsung.
+Relance après limitation du commit aux fichiers index.html et sw.js.
