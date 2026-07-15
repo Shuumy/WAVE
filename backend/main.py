@@ -3,6 +3,9 @@
 La recherche utilise ytmusicapi. Le téléchargement utilise yt-dlp et renvoie le
 meilleur flux audio disponible sans conversion FFmpeg, afin de rester léger sur
 un petit service Render.
+
+Les cookies YouTube sont lus uniquement depuis un Secret File Render. Le fichier
+secret n'est jamais renvoyé au client, journalisé ou stocké dans le dépôt.
 """
 
 from __future__ import annotations
@@ -24,14 +27,19 @@ from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 from ytmusicapi import YTMusic
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
+MAX_COOKIE_BYTES = 1024 * 1024
 DOWNLOAD_SEMAPHORE = threading.BoundedSemaphore(value=1)
 DEFAULT_FRONTEND_ORIGINS = (
     "https://shuumy.github.io",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
+)
+COOKIE_CANDIDATES = (
+    Path("/etc/secrets/cookies.txt"),
+    Path.cwd() / "cookies.txt",
 )
 
 
@@ -39,6 +47,54 @@ def _allowed_origins() -> list[str]:
     configured = os.getenv("FRONTEND_ORIGINS", "")
     origins = [origin.strip().rstrip("/") for origin in configured.split(",") if origin.strip()]
     return origins or list(DEFAULT_FRONTEND_ORIGINS)
+
+
+def _cookie_source() -> Path | None:
+    """Retourne un Secret File cookies.txt valide sans exposer son contenu."""
+
+    configured = os.getenv("YOUTUBE_COOKIES_FILE", "").strip()
+    candidates = (Path(configured), *COOKIE_CANDIDATES) if configured else COOKIE_CANDIDATES
+
+    for candidate in candidates:
+        try:
+            if not candidate.is_file():
+                continue
+            size = candidate.stat().st_size
+            if size <= 0 or size > MAX_COOKIE_BYTES:
+                continue
+            with candidate.open("r", encoding="utf-8", errors="replace") as handle:
+                first_line = handle.readline().strip()
+                preview = handle.read(64 * 1024)
+            if "Netscape HTTP Cookie File" not in first_line:
+                continue
+            if "youtube.com" not in preview and ".google.com" not in preview:
+                continue
+            return candidate
+        except OSError:
+            continue
+
+    return None
+
+
+def _private_cookie_copy(temp_dir: Path) -> Path | None:
+    """Copie le secret dans le dossier temporaire pour que yt-dlp puisse l'utiliser.
+
+    Render peut monter les Secret Files en lecture seule. yt-dlp pouvant mettre à
+    jour le cookie jar, une copie privée et éphémère évite toute écriture sur le
+    secret original. Elle est supprimée avec le dossier du téléchargement.
+    """
+
+    source = _cookie_source()
+    if source is None:
+        return None
+
+    destination = temp_dir / ".youtube-cookies.txt"
+    shutil.copyfile(source, destination)
+    try:
+        destination.chmod(0o600)
+    except OSError:
+        pass
+    return destination
 
 
 app = FastAPI(
@@ -92,7 +148,11 @@ def root() -> dict[str, str]:
 
 @app.get("/api/health", tags=["État"])
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": APP_VERSION}
+    return {
+        "status": "ok",
+        "version": APP_VERSION,
+        "youtubeCookies": "configured" if _cookie_source() else "missing",
+    }
 
 
 def _artist_names(item: dict[str, Any]) -> list[str]:
@@ -163,6 +223,7 @@ def _download_audio(video_id: str) -> tuple[Path, Path, dict[str, Any]]:
     temp_dir = Path(tempfile.mkdtemp(prefix="wave-audio-"))
     output_template = str(temp_dir / "%(id)s.%(ext)s")
     source_url = f"https://www.youtube.com/watch?v={video_id}"
+    cookie_copy = _private_cookie_copy(temp_dir)
 
     options: dict[str, Any] = {
         "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
@@ -171,12 +232,19 @@ def _download_audio(video_id: str) -> tuple[Path, Path, dict[str, Any]]:
         "quiet": True,
         "no_warnings": True,
         "restrictfilenames": True,
-        "socket_timeout": 20,
-        "retries": 2,
-        "fragment_retries": 2,
+        "socket_timeout": 25,
+        "retries": 3,
+        "fragment_retries": 3,
         "max_filesize": MAX_DOWNLOAD_BYTES,
         "overwrites": True,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android_vr", "web_safari"],
+            },
+        },
     }
+    if cookie_copy is not None:
+        options["cookiefile"] = str(cookie_copy)
 
     try:
         with YoutubeDL(options) as downloader:
@@ -189,7 +257,11 @@ def _download_audio(video_id: str) -> tuple[Path, Path, dict[str, Any]]:
         raise
 
     if not file_path.is_file():
-        files = [path for path in temp_dir.iterdir() if path.is_file()]
+        files = [
+            path
+            for path in temp_dir.iterdir()
+            if path.is_file() and path.name != ".youtube-cookies.txt"
+        ]
         file_path = files[0] if files else file_path
 
     if not file_path.is_file() or file_path.stat().st_size < 10_000:
@@ -226,10 +298,17 @@ def download_audio(
     try:
         temp_dir, file_path, info = _download_audio(video_id)
     except DownloadError as error:
-        raise HTTPException(
-            status_code=502,
-            detail="yt-dlp n'a pas pu récupérer ce média.",
-        ) from error
+        message = str(error).lower()
+        if "sign in to confirm" in message or "not a bot" in message:
+            detail = (
+                "YouTube refuse la session actuelle. Vérifie que le Secret File "
+                "Render s'appelle cookies.txt et que /api/health indique configured."
+            )
+        elif "cookies" in message:
+            detail = "Les cookies YouTube sont absents, invalides ou expirés."
+        else:
+            detail = "yt-dlp n'a pas pu récupérer ce média."
+        raise HTTPException(status_code=502, detail=detail) from error
     except RuntimeError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     finally:
