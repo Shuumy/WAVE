@@ -1,5 +1,5 @@
 // WAVE service worker — cache applicatif uniquement
-const CACHE_NAME = 'wave-v14';
+const CACHE_NAME = 'wave-v15';
 const ASSETS = [
   './', './index.html', './css/style.css', './js/db.js', './js/tracks.js',
   './js/player.js', './js/app.js', './manifest.json',

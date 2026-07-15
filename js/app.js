@@ -1328,37 +1328,7 @@
   fileInput.addEventListener('change', () => { if(fileInput.files.length) { importFiles(fileInput.files); fileInput.value=''; } });
   importDropzone.addEventListener('click', (e) => { if(!e.target.closest('.import-btn') && e.target.tagName!=='LABEL') fileInput.click(); });
 
-  // ===== Import YouTube via WAVE API =====
-  const ytImportInput    = $('#ytImportInput');
-  const ytImportBtn      = $('#ytImportBtn');
-  const ytPreviewCard    = $('#ytPreviewCard');
-  const ytPreviewThumb   = $('#ytPreviewThumb');
-  const ytPreviewTitleEl = $('#ytPreviewTitle');
-  const ytPreviewMetaEl  = $('#ytPreviewMeta');
-  const ytPreviewSaveBtn = $('#ytPreviewSaveBtn');
-  const ytPreviewDlBtn   = $('#ytPreviewDlBtn');
-  const ytImportProgress = $('#ytImportProgress');
-  const ytImportFill     = $('#ytImportFill');
-  const ytImportText     = $('#ytImportText');
-
-  let _ytPreviewData = null;
-
-  function extractYouTubeVideoId(input) {
-    input = (input || '').trim();
-    if (!input) return null;
-    if (/^[a-zA-Z0-9_-]{11}$/.test(input)) return input;
-    try {
-      const u = new URL(input);
-      if (u.hostname.includes('youtube.com')) {
-        if (u.pathname.startsWith('/shorts/')) return u.pathname.split('/')[2]?.slice(0, 11) || null;
-        return u.searchParams.get('v');
-      }
-      if (u.hostname === 'youtu.be') return u.pathname.slice(1).split('?')[0].slice(0, 11) || null;
-    } catch {}
-    const m = input.match(/(?:v=|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})/);
-    return m ? m[1] : null;
-  }
-
+  // ===== Téléchargement WAVE API (utilisé depuis les résultats de recherche) =====
   function filenameFromDisposition(header, fallback) {
     if (!header) return fallback;
     const utf = header.match(/filename\*=UTF-8''([^;]+)/i);
@@ -1385,66 +1355,6 @@
     return { blob, mimeType, fileName };
   }
 
-  async function analyzeYouTubeUrl() {
-    const videoId = extractYouTubeVideoId(ytImportInput.value);
-    if (!videoId) { showToast('URL YouTube invalide'); return; }
-    _ytPreviewData = { videoId, title: `YouTube ${videoId}`, artist: '', duration: 0, thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` };
-    ytPreviewCard.hidden = false;
-    ytPreviewThumb.src = _ytPreviewData.thumbnailUrl;
-    ytPreviewTitleEl.textContent = _ytPreviewData.title;
-    ytPreviewMetaEl.textContent = 'Téléchargement via WAVE API';
-    ytPreviewSaveBtn.hidden = false;
-    ytPreviewDlBtn.hidden = false;
-    ytPreviewSaveBtn.disabled = userTracks.some(t => t.youtubeId === videoId);
-    ytPreviewDlBtn.disabled = false;
-  }
-
-  async function saveFromYouTube() {
-    if (!_ytPreviewData) return;
-    const { videoId, title, artist, thumbnailUrl } = _ytPreviewData;
-    ytPreviewSaveBtn.disabled = true; ytPreviewDlBtn.disabled = true;
-    ytImportProgress.hidden = false; ytImportFill.style.width = '20%'; ytImportText.textContent = 'WAVE API...';
-    try {
-      const { blob, mimeType, fileName } = await downloadWaveAudio(videoId);
-      ytImportFill.style.width = '80%'; ytImportText.textContent = 'Validation...';
-      const { duration } = await validateAudio(blob);
-      const ext = fileName.includes('.') ? fileName.split('.').pop() : (mimeType.includes('mp4') ? 'm4a' : 'webm');
-      const meta = {
-        id: `yt-${videoId}-${Date.now()}`, title, artist: artist || 'Artiste inconnu', album: '',
-        duration: Math.round(duration || 0), genre: '', color: randColor(), userImported: true,
-        fileName: `${videoId}.${ext}`, importedAt: Date.now(), coverArt: thumbnailUrl, youtubeId: videoId,
-      };
-      await DB.saveUserTrack(meta, blob); userTracks.push(meta);
-      ytImportFill.style.width = '100%'; ytImportText.textContent = 'Ajouté à la bibliothèque';
-      showToast(`"${meta.title}" sauvegardé`); refreshAllViews();
-    } catch (err) {
-      ytImportFill.style.width = '0%'; ytImportText.textContent = `Erreur : ${(err.message || 'Échec').slice(0, 100)}`;
-      ytPreviewSaveBtn.disabled = false; showToast(`Erreur : ${(err.message || 'Échec').slice(0, 70)}`);
-    } finally { ytPreviewDlBtn.disabled = false; }
-  }
-
-  async function downloadToDevice() {
-    if (!_ytPreviewData) return;
-    const { videoId, title } = _ytPreviewData;
-    ytPreviewDlBtn.disabled = true; ytPreviewSaveBtn.disabled = true;
-    ytImportProgress.hidden = false; ytImportFill.style.width = '20%'; ytImportText.textContent = 'WAVE API...';
-    try {
-      const { blob, fileName } = await downloadWaveAudio(videoId);
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = blobUrl; a.download = fileName || title; document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
-      ytImportFill.style.width = '100%'; ytImportText.textContent = 'Téléchargement lancé'; showToast('Téléchargement lancé');
-    } catch (err) {
-      ytImportFill.style.width = '0%'; ytImportText.textContent = `Erreur : ${(err.message || 'Échec').slice(0, 100)}`;
-      showToast(`Erreur : ${(err.message || 'Échec').slice(0, 70)}`);
-    } finally { ytPreviewDlBtn.disabled = false; ytPreviewSaveBtn.disabled = false; }
-  }
-
-  ytImportBtn.addEventListener('click', analyzeYouTubeUrl);
-  ytImportInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); analyzeYouTubeUrl(); } });
-  ytImportInput.addEventListener('input', () => { if (!ytImportInput.value.trim()) { ytPreviewCard.hidden = true; _ytPreviewData = null; } });
-  ytPreviewSaveBtn.addEventListener('click', saveFromYouTube);
-  ytPreviewDlBtn.addEventListener('click', downloadToDevice);
 
   importDropzone.addEventListener('dragover', (e) => { e.preventDefault(); importDropzone.classList.add('dragover'); });
   importDropzone.addEventListener('dragleave', () => importDropzone.classList.remove('dragover'));
