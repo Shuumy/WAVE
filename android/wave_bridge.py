@@ -4,6 +4,8 @@
 Le serveur écoute uniquement sur 127.0.0.1. Il accepte les appels de la PWA WAVE,
 télécharge l'audio avec yt-dlp depuis la connexion du téléphone, puis renvoie le
 fichier à WAVE pour son stockage hors ligne dans IndexedDB.
+
+Aucun cookie, compte ou secret n'est lu par ce service.
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from yt_dlp.version import __version__ as YTDLP_VERSION
 
 HOST = "127.0.0.1"
 PORT = 8765
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 DOWNLOAD_ROUTE_RE = re.compile(r"^/api/download/([A-Za-z0-9_-]{11})$")
@@ -35,7 +37,6 @@ ALLOWED_ORIGINS = {
     "http://127.0.0.1:8000",
     "http://localhost:8000",
 }
-COOKIE_FILE = Path.home() / ".config" / "wave-bridge" / "cookies.txt"
 
 
 def safe_filename(title: str, extension: str) -> str:
@@ -46,7 +47,7 @@ def safe_filename(title: str, extension: str) -> str:
 def download_error_message(error: Exception) -> str:
     message = str(error).lower()
     if "sign in to confirm" in message or "not a bot" in message:
-        return "YouTube demande une session valide. Mets yt-dlp à jour puis réessaie."
+        return "YouTube refuse cette requête. Mets yt-dlp à jour puis réessaie."
     if "requested format is not available" in message:
         return "YouTube n'a fourni aucun flux audio compatible pour cette vidéo."
     if "private video" in message:
@@ -77,8 +78,6 @@ def download_audio(video_id: str) -> tuple[Path, Path, dict[str, Any]]:
         "max_filesize": MAX_DOWNLOAD_BYTES,
         "overwrites": True,
     }
-    if COOKIE_FILE.is_file() and 0 < COOKIE_FILE.stat().st_size <= 1024 * 1024:
-        options["cookiefile"] = str(COOKIE_FILE)
 
     try:
         with YoutubeDL(options) as downloader:
@@ -158,7 +157,7 @@ class WaveBridgeHandler(BaseHTTPRequestHandler):
             return
 
         path = urlparse(self.path).path
-        if path == "/" or path == "/api/health":
+        if path in {"/", "/api/health"}:
             self.send_json(
                 200,
                 {
@@ -166,7 +165,7 @@ class WaveBridgeHandler(BaseHTTPRequestHandler):
                     "service": "WAVE Samsung Bridge",
                     "version": APP_VERSION,
                     "ytDlpVersion": YTDLP_VERSION,
-                    "cookiesConfigured": COOKIE_FILE.is_file(),
+                    "authentication": "none",
                 },
             )
             return

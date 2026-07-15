@@ -1,0 +1,21 @@
+# Secrets et configurations locales
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+cookies.txt
+.youtube-cookies.txt
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Systèmes et éditeurs
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
