@@ -38,15 +38,27 @@ jobs:
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             'platforms;android-35' \
-            'build-tools;35.0.0'
+            'build-tools;35.0.0' >/dev/null
 
       - name: Construire l'APK de test
-        run: gradle -p android-app --no-daemon clean assembleDebug
-
-      - name: Préparer l'APK de test
+        shell: bash
         run: |
           mkdir -p dist
-          cp android-app/app/build/outputs/apk/debug/app-debug.apk dist/WAVE-debug.apk
+          set -o pipefail
+          gradle -p android-app --no-daemon --console=plain --stacktrace clean assembleDebug \
+            2>&1 | tee dist/gradle-build.log
+
+      - name: Publier le journal de construction
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: WAVE-android-build-log
+          path: dist/gradle-build.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Préparer l'APK de test
+        run: cp android-app/app/build/outputs/apk/debug/app-debug.apk dist/WAVE-debug.apk
 
       - uses: actions/upload-artifact@v4
         with:
@@ -70,7 +82,7 @@ jobs:
           WAVE_KEYSTORE_PASSWORD: ${{ secrets.WAVE_KEYSTORE_PASSWORD }}
           WAVE_KEY_ALIAS: ${{ secrets.WAVE_KEY_ALIAS }}
           WAVE_KEY_PASSWORD: ${{ secrets.WAVE_KEY_PASSWORD }}
-        run: gradle -p android-app --no-daemon assembleRelease
+        run: gradle -p android-app --no-daemon --console=plain assembleRelease
 
       - name: Préparer l'APK privée signée
         if: ${{ github.event_name != 'pull_request' && env.HAS_SIGNING_KEY == 'true' }}
