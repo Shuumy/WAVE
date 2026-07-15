@@ -1,0 +1,39 @@
+name: Apply direct WAVE API refactor
+
+on:
+  push:
+    branches:
+      - refactor/direct-wave-api
+    paths:
+      - tools/refactor_direct_wave_api.py
+      - .github/workflows/apply-direct-wave-refactor.yml
+
+permissions:
+  contents: write
+
+jobs:
+  refactor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refactor/direct-wave-api
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Nettoyer le frontend historique
+        run: python tools/refactor_direct_wave_api.py
+      - name: Vérifier les références obsolètes
+        run: |
+          ! grep -R -n -E 'PIPED_INSTANCES|INVIDIOUS_FALLBACK|downloadFromPiped|downloadFromInvidious|api\.invidious\.io' js/app.js
+          ! grep -R -n -E 'piped-router|download-router|ytmusic-api' index.html sw.js
+          python -m py_compile backend/main.py backend/diagnostic_app.py
+      - name: Enregistrer le résultat et retirer les outils temporaires
+        run: |
+          rm -f tools/refactor_direct_wave_api.py .github/workflows/apply-direct-wave-refactor.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'refactor: utiliser WAVE API directement sans Piped ni Invidious'
+          git push origin HEAD:refactor/direct-wave-api
