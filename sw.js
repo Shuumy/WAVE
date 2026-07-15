@@ -1,11 +1,5 @@
-/**
- * WAVE — Service Worker
- *
- * Met en cache les assets locaux et injecte les clients WAVE API et Piped
- * avant app.js. Les requêtes externes ne sont jamais mises en cache.
- */
-
-const CACHE_NAME = 'wave-v9';
+// WAVE service worker
+const CACHE_NAME = 'wave-v10';
 const API_ORIGIN = 'https://wave-jc53.onrender.com';
 const ASSETS = [
   './',
@@ -47,6 +41,7 @@ self.addEventListener('fetch', event => {
     return;
   }
 
+  // Recherche et téléchargement yt-dlp restent toujours côté réseau.
   if (url.origin !== self.location.origin) {
     event.respondWith(fetch(request).catch(() => new Response('', { status: 503 })));
     return;
