@@ -2,8 +2,8 @@
  * WAVE — Adaptateur ytmusicapi
  *
  * Intercepte uniquement les recherches musicales envoyées par l'application
- * aux instances Piped et les redirige vers le backend FastAPI de WAVE.
- * Toutes les autres requêtes réseau continuent d'utiliser fetch normalement.
+ * aux instances Piped et les redirige vers un endpoint virtuel local. Le
+ * service worker relaie ensuite la requête vers le backend Render.
  */
 (() => {
   'use strict';
@@ -38,6 +38,7 @@
           : '',
       thumbnail,
       duration: Number.isFinite(track.durationSeconds) ? track.durationSeconds : 0,
+      waveSource: 'ytmusicapi',
     };
   }
 
@@ -56,7 +57,9 @@
       });
     }
 
-    const apiUrl = new URL('/api/search', API_BASE_URL);
+    // Endpoint local virtuel, intercepté par le service worker. Cela évite les
+    // problèmes de CSP et garantit que la recherche passe bien par Render.
+    const apiUrl = new URL('./__wave_api/search', window.location.href);
     apiUrl.searchParams.set('query', query);
     apiUrl.searchParams.set('limit', '12');
 
@@ -77,9 +80,10 @@
 
     return new Response(JSON.stringify({ items }), {
       status: 200,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-WAVE-Source': 'ytmusicapi' },
     });
   };
 
   window.WAVE_API_BASE_URL = API_BASE_URL;
+  window.WAVE_SEARCH_SOURCE = 'ytmusicapi';
 })();
