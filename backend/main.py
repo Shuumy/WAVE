@@ -27,7 +27,7 @@ from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 from ytmusicapi import YTMusic
 
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
 MAX_COOKIE_BYTES = 1024 * 1024
@@ -226,7 +226,11 @@ def _download_audio(video_id: str) -> tuple[Path, Path, dict[str, Any]]:
     cookie_copy = _private_cookie_copy(temp_dir)
 
     options: dict[str, Any] = {
-        "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
+        # Laisse yt-dlp choisir le meilleur flux audio réellement disponible.
+        # Les anciens clients forcés (android_vr/web_safari) pouvaient exposer
+        # seulement des formats inexploitables et provoquer "Requested format
+        # is not available" même avec des cookies valides.
+        "format": "bestaudio/best",
         "outtmpl": output_template,
         "noplaylist": True,
         "quiet": True,
@@ -237,11 +241,6 @@ def _download_audio(video_id: str) -> tuple[Path, Path, dict[str, Any]]:
         "fragment_retries": 3,
         "max_filesize": MAX_DOWNLOAD_BYTES,
         "overwrites": True,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android_vr", "web_safari"],
-            },
-        },
     }
     if cookie_copy is not None:
         options["cookiefile"] = str(cookie_copy)
@@ -303,6 +302,11 @@ def download_audio(
             detail = (
                 "YouTube refuse la session actuelle. Vérifie que le Secret File "
                 "Render s'appelle cookies.txt et que /api/health indique configured."
+            )
+        elif "requested format is not available" in message:
+            detail = (
+                "YouTube n'a fourni aucun flux audio compatible pour cette vidéo. "
+                "Réessaie après le prochain déploiement ou avec une autre vidéo."
             )
         elif "cookies" in message:
             detail = "Les cookies YouTube sont absents, invalides ou expirés."
