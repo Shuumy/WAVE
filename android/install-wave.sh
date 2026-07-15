@@ -8,14 +8,11 @@ BRIDGE_FILE="$INSTALL_DIR/wave_bridge.py"
 
 printf '\n[WAVE] Mise à jour des paquets Termux…\n'
 pkg update -y
-pkg upgrade -y
 
 printf '\n[WAVE] Installation de Python, yt-dlp et ffmpeg…\n'
-pkg install -y python python-pip ffmpeg nodejs-lts curl
-python -m pip install --upgrade pip
-python -m pip install --upgrade "yt-dlp[default]"
+pkg install -y python python-yt-dlp ffmpeg curl
 
-mkdir -p "$INSTALL_DIR" "$HOME/.config/wave-bridge"
+mkdir -p "$INSTALL_DIR"
 curl -fsSL "$REPO_RAW/android/wave_bridge.py" -o "$BRIDGE_FILE"
 chmod 700 "$BRIDGE_FILE"
 
@@ -35,7 +32,8 @@ cat > "$BIN_DIR/wave-update" <<'EOF'
 #!/data/data/com.termux/files/usr/bin/bash
 set -euo pipefail
 REPO_RAW="https://raw.githubusercontent.com/Shuumy/WAVE/main"
-python -m pip install --upgrade "yt-dlp[default]"
+pkg update -y
+pkg upgrade -y python-yt-dlp
 curl -fsSL "$REPO_RAW/android/wave_bridge.py" -o "$HOME/.local/share/wave-samsung/wave_bridge.py"
 chmod 700 "$HOME/.local/share/wave-samsung/wave_bridge.py"
 printf '\nWAVE et yt-dlp sont à jour.\n'
