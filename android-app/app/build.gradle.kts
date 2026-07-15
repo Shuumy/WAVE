@@ -28,6 +28,10 @@ android {
         versionName = "1.0.0"
     }
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     signingConfigs {
         if (hasReleaseSigning) {
             create("release") {
