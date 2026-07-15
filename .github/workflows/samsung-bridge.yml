@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'android/**'
+      - 'js/player.js'
       - 'js/samsung-bridge.js'
       - 'sw.js'
       - '.github/workflows/samsung-bridge.yml'
@@ -11,6 +12,7 @@ on:
     branches: [main]
     paths:
       - 'android/**'
+      - 'js/player.js'
       - 'js/samsung-bridge.js'
       - 'sw.js'
       - '.github/workflows/samsung-bridge.yml'
@@ -33,6 +35,7 @@ jobs:
         run: python -m py_compile android/wave_bridge.py
       - name: Check JavaScript syntax
         run: |
+          node --check js/player.js
           node --check js/samsung-bridge.js
           node --check sw.js
       - name: Check shell syntax
