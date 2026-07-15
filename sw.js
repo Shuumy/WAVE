@@ -1,11 +1,11 @@
 /**
  * WAVE — Service Worker
  *
- * Met en cache les assets locaux et injecte explicitement le client WAVE API
+ * Met en cache les assets locaux et injecte les clients WAVE API et Piped
  * avant app.js. Les requêtes externes ne sont jamais mises en cache.
  */
 
-const CACHE_NAME = 'wave-v8';
+const CACHE_NAME = 'wave-v9';
 const API_ORIGIN = 'https://wave-jc53.onrender.com';
 const ASSETS = [
   './',
@@ -15,6 +15,7 @@ const ASSETS = [
   './js/tracks.js',
   './js/player.js',
   './js/ytmusic-api.js',
+  './js/piped-router.js',
   './js/app.js',
   './manifest.json',
 ];
@@ -77,8 +78,6 @@ async function loadAppShell(request) {
 
   let html = await response.text();
 
-  // Le navigateur applique la CSP du document transformé. On autorise donc
-  // explicitement le backend Render dans connect-src.
   if (!html.includes(API_ORIGIN)) {
     html = html.replace(
       "connect-src 'self'",
@@ -86,12 +85,15 @@ async function loadAppShell(request) {
     );
   }
 
-  // Le client API doit être chargé avant app.js pour remplacer la recherche
-  // historique avant son premier appel réseau.
   if (!html.includes('./js/ytmusic-api.js')) {
     html = html.replace(
       '<script src="./js/app.js"></script>',
-      '<script src="./js/ytmusic-api.js"></script>\n  <script src="./js/app.js"></script>'
+      '<script src="./js/ytmusic-api.js"></script>\n  <script src="./js/piped-router.js"></script>\n  <script src="./js/app.js"></script>'
+    );
+  } else if (!html.includes('./js/piped-router.js')) {
+    html = html.replace(
+      '<script src="./js/app.js"></script>',
+      '<script src="./js/piped-router.js"></script>\n  <script src="./js/app.js"></script>'
     );
   }
 
