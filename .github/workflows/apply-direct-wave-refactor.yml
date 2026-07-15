@@ -1,6 +1,7 @@
 name: Apply direct WAVE API refactor
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - refactor/direct-wave-api
