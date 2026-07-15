@@ -26,6 +26,8 @@ jobs:
       - name: Nettoyer le frontend historique
         run: |
           set -o pipefail
+          rm -f refactor-error.log
+          sed -i "s/re.subn(pattern, replacement, text/re.subn(pattern, lambda _match: replacement, text/" tools/refactor_direct_wave_api.py
           python tools/refactor_direct_wave_api.py 2>&1 | tee /tmp/refactor.log
       - name: Conserver l’erreur pour analyse
         if: failure()
