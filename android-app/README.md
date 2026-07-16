@@ -16,11 +16,25 @@ https://shuumy.github.io/WAVE/
 
 Le site GitHub Pages et son code restent publics. Le verrouillage protège l'APK installée sur le téléphone, pas l'adresse publique du site.
 
+## Lecteur Android en arrière-plan
+
+La version 1.1.0 ajoute un service multimédia Android avec une notification et des commandes sur l'écran verrouillé :
+
+- lecture et pause ;
+- morceau précédent et suivant ;
+- avance et retour de 10 secondes ;
+- titre, artiste, album, pochette et progression ;
+- commandes depuis les écouteurs et les contrôles média Samsung.
+
+Sur Android 13 ou une version plus récente, accepte la permission **Notifications** au premier lancement. Sans cette permission, la musique peut continuer mais le lecteur ne sera pas visible dans le volet des notifications.
+
+Le verrouillage biométrique ou par PIN ne se redéclenche pas tant qu'un morceau joue. Quand la lecture est mise en pause en arrière-plan, le délai de verrouillage de 30 secondes recommence.
+
 ## Mises à jour
 
 Les modifications HTML, CSS et JavaScript publiées sur GitHub Pages apparaissent dans l'APK sans reconstruction. Ferme puis rouvre l'application, ou actualise WAVE, pour charger la nouvelle version.
 
-Une nouvelle APK est nécessaire uniquement lorsque les fichiers de `android-app/` changent : icône, verrouillage, permissions, comportement WebView ou configuration Android.
+Une nouvelle APK est nécessaire uniquement lorsque les fichiers de `android-app/` changent : icône, verrouillage, permissions, comportement WebView, service multimédia ou configuration Android.
 
 ## Téléchargement local
 
