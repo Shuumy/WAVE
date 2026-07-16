@@ -7,6 +7,14 @@
     <string name="device_lock_required_message">Configure d’abord une empreinte, un visage, un PIN, un schéma ou un mot de passe dans les paramètres Android.</string>
     <string name="open_settings">Ouvrir les paramètres</string>
     <string name="close_app">Fermer</string>
+    <string name="media_channel_name">Lecteur WAVE</string>
+    <string name="media_channel_description">Commandes de lecture dans les notifications et sur l’écran verrouillé.</string>
+    <string name="media_play">Lecture</string>
+    <string name="media_pause">Pause</string>
+    <string name="media_previous">Précédent</string>
+    <string name="media_next">Suivant</string>
+    <string name="media_rewind">Reculer de 10 secondes</string>
+    <string name="media_forward">Avancer de 10 secondes</string>
     <string name="offline_html" formatted="false"><![CDATA[
         <!doctype html><html lang="fr"><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>
         body{margin:0;background:#0a0a0a;color:#fff;font-family:sans-serif;display:grid;place-items:center;min-height:100vh;text-align:center;padding:24px;box-sizing:border-box}

@@ -8,6 +8,12 @@ const Player = (() => {
   audio.preload = 'auto';
 
   const hasMediaSession = 'mediaSession' in navigator && 'MediaMetadata' in window;
+  const nativeBridge = window.WaveAndroid || null;
+  const hasNativeBridge = Boolean(
+    nativeBridge &&
+    typeof nativeBridge.updateMetadata === 'function' &&
+    typeof nativeBridge.updatePlayback === 'function'
+  );
   const fallbackArtwork = new URL('./assets/icons/icon-512-v2.png', window.location.href).href;
 
   let currentTrack = null;
@@ -18,6 +24,7 @@ const Player = (() => {
   let repeat = 'none';
   let audioUnlocked = false;
   let audioCtx = null;
+  let nativeLastPositionSync = 0;
   const listeners = {};
 
   function unlockAudio() {
@@ -38,6 +45,44 @@ const Player = (() => {
     if (audioCtx && audioCtx.state === 'suspended') {
       try { await audioCtx.resume(); } catch (_) {}
     }
+  }
+
+  function callNative(method, payload) {
+    if (!hasNativeBridge) return;
+    try { nativeBridge[method](JSON.stringify(payload)); } catch (_) {}
+  }
+
+  function nativeArtwork(track) {
+    const cover = typeof track?.coverArt === 'string' ? track.coverArt.trim() : '';
+    if (/^https:\/\//i.test(cover)) return cover;
+    if (/^data:image\//i.test(cover) && cover.length <= 3_000_000) return cover;
+    return '';
+  }
+
+  function updateNativeMetadata(track) {
+    callNative('updateMetadata', {
+      title: track?.title || 'WAVE',
+      artist: track?.artist || 'Lecture audio',
+      album: track?.album || 'WAVE',
+      artwork: nativeArtwork(track),
+    });
+  }
+
+  function updateNativePlayback(force = false) {
+    if (!hasNativeBridge) return;
+    const now = Date.now();
+    if (!force && now - nativeLastPositionSync < 5000) return;
+    nativeLastPositionSync = now;
+    callNative('updatePlayback', {
+      playing: isPlaying,
+      positionMs: Number.isFinite(audio.currentTime) ? Math.round(audio.currentTime * 1000) : 0,
+      durationMs: Number.isFinite(audio.duration) ? Math.round(audio.duration * 1000) : 0,
+    });
+  }
+
+  function clearNativePlayback() {
+    if (!hasNativeBridge || typeof nativeBridge.clearPlayback !== 'function') return;
+    try { nativeBridge.clearPlayback(); } catch (_) {}
   }
 
   function setMediaPlaybackState(state) {
@@ -104,10 +149,20 @@ const Player = (() => {
   audio.addEventListener('timeupdate', () => {
     emit('timeupdate', { currentTime: audio.currentTime, duration: audio.duration || 0 });
     updateMediaPosition();
+    updateNativePlayback(false);
   });
-  audio.addEventListener('durationchange', updateMediaPosition);
-  audio.addEventListener('ratechange', updateMediaPosition);
-  audio.addEventListener('seeked', updateMediaPosition);
+  audio.addEventListener('durationchange', () => {
+    updateMediaPosition();
+    updateNativePlayback(true);
+  });
+  audio.addEventListener('ratechange', () => {
+    updateMediaPosition();
+    updateNativePlayback(true);
+  });
+  audio.addEventListener('seeked', () => {
+    updateMediaPosition();
+    updateNativePlayback(true);
+  });
 
   audio.addEventListener('ended', () => {
     if (repeat === 'one') {
@@ -122,17 +177,20 @@ const Player = (() => {
     isPlaying = true;
     setMediaPlaybackState('playing');
     updateMediaPosition();
+    updateNativePlayback(true);
     emit('statechange', { playing: true });
   });
   audio.addEventListener('pause', () => {
     isPlaying = false;
     setMediaPlaybackState('paused');
     updateMediaPosition();
+    updateNativePlayback(true);
     emit('statechange', { playing: false });
   });
-  audio.addEventListener('error', (event) => {
+  audio.addEventListener('error', event => {
     console.error('Audio error:', event);
     setMediaPlaybackState('none');
+    clearNativePlayback();
     emit('error', { message: 'Erreur de lecture audio' });
   });
 
@@ -158,6 +216,7 @@ const Player = (() => {
     }
     audio.src = URL.createObjectURL(blob);
     updateMediaMetadata(track);
+    updateNativeMetadata(track);
     DB.addRecent(track.id);
     return true;
   }
@@ -179,6 +238,7 @@ const Player = (() => {
     audio.src = url;
     audio.load();
     updateMediaMetadata(null);
+    updateNativeMetadata(null);
     await ensureAudioContextActive();
     try {
       await audio.play();
@@ -199,7 +259,7 @@ const Player = (() => {
     }
     if (audio.src) {
       await ensureAudioContextActive();
-      audio.play().catch((error) => {
+      audio.play().catch(error => {
         console.error('Resume failed:', error);
         emit('error', { message: 'Impossible de reprendre la lecture' });
       });
@@ -289,6 +349,40 @@ const Player = (() => {
     pause();
     audio.currentTime = 0;
   });
+
+  window.WAVE_NATIVE_MEDIA_COMMAND = async (action, value = 0) => {
+    switch (action) {
+      case 'play':
+        await play();
+        break;
+      case 'pause':
+        pause();
+        break;
+      case 'previous':
+        prev();
+        break;
+      case 'next':
+        next();
+        break;
+      case 'seekbackward':
+        seekRelative(-Math.max(1, Number(value) || 10));
+        break;
+      case 'seekforward':
+        seekRelative(Math.max(1, Number(value) || 10));
+        break;
+      case 'seekto':
+        if (audio.duration && Number.isFinite(Number(value))) {
+          audio.currentTime = Math.max(0, Math.min(audio.duration, Number(value)));
+        }
+        break;
+      case 'stop':
+        pause();
+        audio.currentTime = 0;
+        setMediaPlaybackState('none');
+        clearNativePlayback();
+        break;
+    }
+  };
 
   return {
     on,
