@@ -6,15 +6,21 @@
     android:viewportHeight="108">
     <path
         android:fillColor="@android:color/transparent"
-        android:pathData="M24,25 L34,82 L52,42 L62,82 L84,25"
-        android:strokeColor="@color/wave_yellow"
+        android:pathData="M46.85,17.15 L46.85,56.75 C46.85,66.3 61.15,66.3 61.15,56.75 L61.15,17.15"
+        android:strokeColor="@color/wave_icon_dark"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:strokeWidth="8" />
+        android:strokeWidth="5.5" />
     <path
         android:fillColor="@android:color/transparent"
-        android:pathData="M20,90 C34,83 45,97 58,90 C70,83 79,94 88,89"
-        android:strokeColor="@color/wave_yellow"
+        android:pathData="M54,63.9 L54,90.85"
+        android:strokeColor="@color/wave_icon_dark"
         android:strokeLineCap="round"
-        android:strokeWidth="4" />
+        android:strokeWidth="5.5" />
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M31.45,28.7 L42.45,28.7 M33.1,38.6 L42.45,38.6 M35.85,48.5 L42.45,48.5 M65.55,28.7 L76.55,28.7 M65.55,38.6 L74.9,38.6 M65.55,48.5 L72.15,48.5"
+        android:strokeColor="@color/wave_icon_dark"
+        android:strokeLineCap="round"
+        android:strokeWidth="2.2" />
 </vector>
