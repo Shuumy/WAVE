@@ -2,5 +2,8 @@
 <resources>
     <color name="wave_black">#0A0A0A</color>
     <color name="wave_yellow">#FFCC00</color>
+    <color name="wave_icon_yellow_top">#FFD740</color>
+    <color name="wave_icon_yellow_bottom">#F0B400</color>
+    <color name="wave_icon_dark">#1C1C1E</color>
     <color name="wave_white">#FFFFFF</color>
 </resources>
