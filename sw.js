@@ -1,9 +1,9 @@
-// WAVE service worker — cache applicatif et injection du pont Samsung
-const CACHE_NAME = 'wave-v20';
+// WAVE service worker — cache applicatif et injection des extensions natives
+const CACHE_NAME = 'wave-v21';
 const LOCAL_BRIDGE_ORIGINS = ['http://127.0.0.1:8765', 'http://localhost:8765'];
 const ASSETS = [
-  './', './index.html', './css/style.css', './js/db.js', './js/tracks.js',
-  './js/player.js', './js/samsung-bridge.js', './js/app.js', './manifest.json',
+  './', './index.html', './css/style.css', './css/ratings.css', './js/db.js', './js/tracks.js',
+  './js/player.js', './js/samsung-bridge.js', './js/app.js', './js/ratings.js', './manifest.json',
 ];
 
 self.addEventListener('install', event => {
@@ -22,8 +22,6 @@ self.addEventListener('fetch', event => {
   const request = event.request;
   const url = new URL(request.url);
 
-  // Laisse Chrome contacter directement le serveur loopback de Termux.
-  // Le pont répond lui-même aux vérifications CORS et Private Network Access.
   if (url.hostname === '127.0.0.1' || url.hostname === 'localhost') return;
 
   if (url.origin !== self.location.origin) {
@@ -70,10 +68,31 @@ async function loadAppShell(request) {
     );
   }
 
+  if (!html.includes('./css/ratings.css')) {
+    html = html.replace(
+      '<link rel="stylesheet" href="./css/style.css">',
+      '<link rel="stylesheet" href="./css/style.css">\n  <link rel="stylesheet" href="./css/ratings.css">'
+    );
+  }
+
+  if (!html.includes('data-tab="rated"')) {
+    html = html.replace(
+      '<button class="tab-btn" data-tab="favorites">Favoris</button>',
+      '<button class="tab-btn" data-tab="favorites">Favoris</button>\n          <button class="tab-btn" data-tab="rated">Notés</button>'
+    );
+  }
+
   if (!html.includes('./js/samsung-bridge.js')) {
     html = html.replace(
       '<script src="./js/app.js"></script>',
       '<script src="./js/samsung-bridge.js"></script>\n  <script src="./js/app.js"></script>'
+    );
+  }
+
+  if (!html.includes('./js/ratings.js')) {
+    html = html.replace(
+      '<script src="./js/app.js"></script>',
+      '<script src="./js/app.js"></script>\n  <script src="./js/ratings.js"></script>'
     );
   }
 
