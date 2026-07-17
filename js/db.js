@@ -3,7 +3,7 @@
  */
 const DB = (() => {
   const DB_NAME = 'wave-db';
-  const DB_VERSION = 1;
+  const DB_VERSION = 2;
   let db = null;
 
   function open() {
@@ -17,6 +17,7 @@ const DB = (() => {
         if (!d.objectStoreNames.contains('audio'))     d.createObjectStore('audio',     { keyPath: 'id' });
         if (!d.objectStoreNames.contains('settings'))  d.createObjectStore('settings',  { keyPath: 'key' });
         if (!d.objectStoreNames.contains('favorites')) d.createObjectStore('favorites', { keyPath: 'id' });
+        if (!d.objectStoreNames.contains('ratings'))   d.createObjectStore('ratings',   { keyPath: 'id' });
         if (!d.objectStoreNames.contains('recent'))    d.createObjectStore('recent',    { keyPath: 'id' });
         if (!d.objectStoreNames.contains('playlists')) d.createObjectStore('playlists', { keyPath: 'id' });
       };
@@ -73,6 +74,7 @@ const DB = (() => {
     await del('tracks', id);
     await del('audio', id);
     await del('favorites', id);
+    await del('ratings', id);
     const pls = await getAll('playlists');
     for (const pl of pls) {
       if (pl.trackIds.includes(id)) {
@@ -118,6 +120,41 @@ const DB = (() => {
   async function getRecent() {
     const recs = await getAll('recent');
     return recs.sort((a, b) => b.timestamp - a.timestamp);
+  }
+
+  function normalizeRating(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number) || number < 0.5 || number > 5 || !Number.isInteger(number * 2)) {
+      throw new TypeError('La note doit être comprise entre 0,5 et 5 par pas de 0,5.');
+    }
+    return number;
+  }
+
+  async function getRating(id) {
+    const rec = await get('ratings', id);
+    return rec ? rec.value : null;
+  }
+
+  async function setRating(id, value) {
+    if (!id || typeof id !== 'string') throw new TypeError('Identifiant de morceau invalide.');
+    const normalized = normalizeRating(value);
+    const previous = await get('ratings', id);
+    const now = Date.now();
+    await put('ratings', {
+      id,
+      value: normalized,
+      ratedAt: previous ? previous.ratedAt : now,
+      updatedAt: now,
+    });
+    return normalized;
+  }
+
+  async function removeRating(id) {
+    await del('ratings', id);
+  }
+
+  async function getRatings() {
+    return await getAll('ratings');
   }
 
   const PLAYLIST_COLORS = ['#e94560','#7b2ff7','#00b4d8','#ff9800','#4caf50','#ff5722','#9c27b0','#3f51b5','#00e676','#f44336'];
@@ -180,6 +217,10 @@ const DB = (() => {
     getFavorites,
     addRecent,
     getRecent,
+    getRating,
+    setRating,
+    removeRating,
+    getRatings,
     getPlaylists,
     getPlaylist,
     createPlaylist,
