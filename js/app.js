@@ -1228,6 +1228,10 @@
 
   // Swipe-up on player bar → open Now Playing
   const playerBar = $('#playerBar');
+  function setMiniPlayerVisible(visible) {
+    playerBar.hidden = !visible;
+    $('#app').classList.toggle('no-player', !visible);
+  }
   let swipeStartY = null;
   playerBar.addEventListener('touchstart', (e) => {
     swipeStartY = e.touches[0].clientY;
@@ -1306,6 +1310,7 @@
 
   // ===== Player Events =====
   Player.on('trackchange', async (track) => {
+    setMiniPlayerVisible(true);
     // textContent pour title et artist : sûr sans esc()
     playerTitle.textContent  = track.title;
     playerArtist.textContent = track.artist;
@@ -1686,6 +1691,7 @@
     ytCurrentVideo = { videoId, title:item.title||'', artist:item.uploaderName||'', thumbnail:thumb };
     ytMode = true;
     Player.pause();
+    setMiniPlayerVisible(true);
 
     // textContent pour title et artist : sûr
     playerTitle.textContent  = item.title || '';
@@ -1790,6 +1796,7 @@
 
   function exitYTMode() {
     ytMode = false; ytCurrentVideo = null;
+    if (!Player.getCurrentTrack()) setMiniPlayerVisible(false);
     stopYTProgress();
     if (ytPlayer && typeof ytPlayer.stopVideo === 'function') ytPlayer.stopVideo();
     playerFavorite.style.display = '';
