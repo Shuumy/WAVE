@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /WAVE/
+Sitemap: https://shuumy.github.io/WAVE/sitemap.xml

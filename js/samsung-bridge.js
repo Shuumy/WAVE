@@ -8,6 +8,12 @@
 (() => {
   'use strict';
 
+  // Le pont Termux est propre à Android ; ne sonder aucun port local sur iOS.
+  if (!/Android/i.test(navigator.userAgent)) {
+    window.WAVE_SAMSUNG_BRIDGE = { state: 'unsupported' };
+    return;
+  }
+
   const REMOTE_API_ORIGIN = 'https://wave-docker.onrender.com';
   const LOCAL_BRIDGE_ORIGIN = 'http://127.0.0.1:8765';
   const DOWNLOAD_PATH = /^\/api\/download\/([A-Za-z0-9_-]{11})$/;

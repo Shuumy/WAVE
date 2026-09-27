@@ -117,21 +117,24 @@
 
   function decorateTracks() {
     document.querySelectorAll('.track-item[data-track-id]').forEach(row => {
-      row.querySelector('.track-rating-badge')?.remove();
+      let button = row.querySelector('.track-rating-badge');
       const value = ratings.get(row.dataset.trackId);
-      if (value === undefined) return;
+      if (value === undefined) { button?.remove(); return; }
       const actions = row.querySelector('.track-actions');
       if (!actions) return;
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'track-rating-badge';
-      button.textContent = `★ ${format(value)}`;
-      button.setAttribute('aria-label', `Note ${format(value)} sur 5. Modifier.`);
-      button.addEventListener('click', event => {
-        event.stopPropagation();
-        openModal(row.dataset.trackId);
-      });
-      actions.insertBefore(button, actions.firstChild);
+      if (!button) {
+        button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'track-rating-badge';
+        button.addEventListener('click', event => {
+          event.stopPropagation();
+          openModal(row.dataset.trackId);
+        });
+        actions.insertBefore(button, actions.firstChild);
+      }
+      const label = `Note ${format(value)} sur 5. Modifier.`;
+      if (button.textContent !== `★ ${format(value)}`) button.textContent = `★ ${format(value)}`;
+      if (button.getAttribute('aria-label') !== label) button.setAttribute('aria-label', label);
     });
   }
 
@@ -153,9 +156,11 @@
     }
     const track = currentTrack();
     const value = track?.id ? ratings.get(track.id) : undefined;
-    button.disabled = !track?.id;
-    button.textContent = value === undefined ? '☆ Noter' : `★ ${format(value)}`;
-    button.setAttribute('aria-label', value === undefined ? 'Noter le morceau en cours' : `Note ${format(value)} sur 5. Modifier.`);
+    if (button.disabled !== !track?.id) button.disabled = !track?.id;
+    const text = value === undefined ? '☆ Noter' : `★ ${format(value)}`;
+    const label = value === undefined ? 'Noter le morceau en cours' : `Note ${format(value)} sur 5. Modifier.`;
+    if (button.textContent !== text) button.textContent = text;
+    if (button.getAttribute('aria-label') !== label) button.setAttribute('aria-label', label);
   }
 
   function injectOptionsItem() {
@@ -207,6 +212,9 @@
     const tracks = (await getTracks())
       .filter(track => ratings.has(track.id))
       .sort((a, b) => ratings.get(b.id) - ratings.get(a.id));
+    const signature = JSON.stringify(tracks.map(track => [track.id, track.title, track.artist, ratings.get(track.id)]));
+    if (content.dataset.ratedSignature === signature && content.querySelector('.rated-list')) return;
+    content.dataset.ratedSignature = signature;
     content.innerHTML = '<div class="rated-header"><strong>Morceaux notés</strong><button type="button" id="ratedDirection">Meilleures notes d’abord</button></div><div class="rated-list"></div>';
     const list = content.querySelector('.rated-list');
     const draw = ordered => {
@@ -279,7 +287,14 @@
     if (options) selectedTrackId = options.closest('.track-item')?.dataset.trackId || null;
   }, true);
 
-  new MutationObserver(scheduleRefresh).observe(document.documentElement, {
+  new MutationObserver(records => {
+    const relevant = records.some(record => {
+      const target = record.target instanceof Element ? record.target : record.target.parentElement;
+      if (!target || target.closest('.rating-modal,.rated-list,.track-rating-badge,.player-rating')) return false;
+      return Boolean(target.closest('.track-list,.library-tabs,.sort-row,#libraryContent,#optionsList,.player-track-info'));
+    });
+    if (relevant) scheduleRefresh();
+  }).observe(document.documentElement, {
     childList: true,
     subtree: true,
     attributes: true,
@@ -289,6 +304,7 @@
 
   async function init() {
     try {
+      await DB.open();
       await loadRatings();
       createModal();
       scheduleRefresh();
