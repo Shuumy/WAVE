@@ -5,12 +5,19 @@ const DB = (() => {
   const DB_NAME = 'wave-db';
   const DB_VERSION = 2;
   let db = null;
+  let opening = null;
 
   function open() {
-    return new Promise((resolve, reject) => {
+    if (db) return Promise.resolve();
+    if (opening) return opening;
+    opening = new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onerror = () => reject(req.error);
-      req.onsuccess = () => { db = req.result; resolve(); };
+      req.onsuccess = () => {
+        db = req.result;
+        db.onversionchange = () => { db.close(); db = null; opening = null; };
+        resolve();
+      };
       req.onupgradeneeded = (e) => {
         const d = e.target.result;
         if (!d.objectStoreNames.contains('tracks'))    d.createObjectStore('tracks',    { keyPath: 'id' });
@@ -21,7 +28,8 @@ const DB = (() => {
         if (!d.objectStoreNames.contains('recent'))    d.createObjectStore('recent',    { keyPath: 'id' });
         if (!d.objectStoreNames.contains('playlists')) d.createObjectStore('playlists', { keyPath: 'id' });
       };
-    });
+    }).catch(error => { opening = null; throw error; });
+    return opening;
   }
 
   function store(name, mode = 'readonly') {

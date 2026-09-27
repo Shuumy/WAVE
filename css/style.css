@@ -1,5 +1,4 @@
-/* ===== WAVE — Figtree (Spotify-like) ===== */
-@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@300;400;500;600;700&display=swap');
+/* Police système : affichage immédiat et aucun appel à une police tierce. */
 
 @keyframes wavePulse  { 0%,100%{opacity:.15;transform:scaleX(.5)} 50%{opacity:1;transform:scaleX(1)} }
 @keyframes wavePulse2 { 0%,100%{opacity:.12;transform:scaleX(.5)} 50%{opacity:.85;transform:scaleX(1)} }
@@ -11,7 +10,7 @@
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { font-size:16px; -webkit-font-smoothing:antialiased; }
 body {
-  font-family:'Figtree', -apple-system, sans-serif;
+  font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background:#0A0A0A; color:#fff;
   overflow:hidden;
   height:100vh; height:100dvh;
@@ -32,8 +31,8 @@ input  { border:none; background:none; color:inherit; font:inherit; outline:none
   --accent-dim:   rgba(255,204,0,0.12);
   --accent-glow:  rgba(255,204,0,0.25);
   --text-primary: #FFFFFF;
-  --text-secondary:#777777;
-  --text-muted:   #404040;
+  --text-secondary:#B8B8B8;
+  --text-muted:   #A3A3A3;
   --border:       #1E1E1E;
   --danger:       #FF3B3B;
   --success:      #FFCC00;
@@ -202,7 +201,7 @@ input  { border:none; background:none; color:inherit; font:inherit; outline:none
 }
 .search-bar:focus-within { border-color:var(--accent); }
 .search-bar svg { width:16px; height:16px; color:var(--text-muted); flex-shrink:0; }
-.search-bar input { flex:1; font-size:0.875rem; font-family:'Figtree',sans-serif; }
+.search-bar input { flex:1; font-size:0.875rem; font-family:inherit; }
 .search-bar input::placeholder { color:var(--text-muted); }
 
 /* ===== Library Tabs ===== */
@@ -261,7 +260,7 @@ input  { border:none; background:none; color:inherit; font:inherit; outline:none
 /* ===== YouTube ===== */
 .yt-search-bar { display:flex; align-items:center; gap:10px; background:var(--bg-secondary); border:1px solid var(--border); border-radius:var(--radius); padding:10px 16px; margin-bottom:16px; transition:border-color var(--transition); }
 .yt-search-bar:focus-within { border-color:rgba(255,0,0,.5); }
-.yt-search-bar input { flex:1; font-size:0.875rem; font-family:'Figtree',sans-serif; }
+.yt-search-bar input { flex:1; font-size:0.875rem; font-family:inherit; }
 .yt-search-bar input::placeholder { color:var(--text-muted); }
 .yt-search-btn { width:32px; height:32px; border-radius:var(--radius-sm); background:#ff0000; color:#fff; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:background var(--transition); }
 .yt-search-btn:hover { background:#cc0000; }
@@ -311,7 +310,7 @@ input  { border:none; background:none; color:inherit; font:inherit; outline:none
 /* ===== Sort ===== */
 .sort-row { display:flex; align-items:center; gap:8px; margin-bottom:14px; flex-wrap:wrap; }
 .sort-label { font-size:0.65rem; color:var(--text-muted); letter-spacing:0.15em; text-transform:uppercase; }
-.sort-btn { padding:4px 12px; border-radius:var(--radius-sm); font-size:0.65rem; letter-spacing:0.12em; text-transform:uppercase; color:var(--text-muted); background:var(--bg-secondary); border:1px solid var(--border); transition:all var(--transition); font-family:'Figtree',sans-serif; }
+.sort-btn { padding:4px 12px; border-radius:var(--radius-sm); font-size:0.65rem; letter-spacing:0.12em; text-transform:uppercase; color:var(--text-muted); background:var(--bg-secondary); border:1px solid var(--border); transition:all var(--transition); font-family:inherit; }
 .sort-btn:hover { color:var(--text-secondary); }
 .sort-btn.active { color:var(--accent); border-color:var(--accent); background:var(--accent-dim); }
 
@@ -393,7 +392,7 @@ input  { border:none; background:none; color:inherit; font:inherit; outline:none
   flex:1; padding:12px; border-radius:var(--radius);
   background:var(--bg-hover); border:1px solid var(--border);
   font-size:0.8rem; font-weight:500; letter-spacing:0.1em; text-transform:uppercase;
-  color:var(--text-secondary); font-family:'Figtree',sans-serif;
+  color:var(--text-secondary); font-family:inherit;
   transition:all var(--transition);
 }
 .confirm-no:hover { color:var(--text-primary); border-color:var(--text-muted); }
@@ -401,7 +400,7 @@ input  { border:none; background:none; color:inherit; font:inherit; outline:none
   flex:1; padding:12px; border-radius:var(--radius);
   background:var(--danger); border:none;
   font-size:0.8rem; font-weight:600; letter-spacing:0.1em; text-transform:uppercase;
-  color:#fff; font-family:'Figtree',sans-serif;
+  color:#fff; font-family:inherit;
   transition:all var(--transition);
 }
 .confirm-yes:hover { background:#e02020; }
@@ -423,13 +422,13 @@ input  { border:none; background:none; color:inherit; font:inherit; outline:none
 .modal-body .playlist-option .pl-color { width:28px; height:28px; border-radius:var(--radius-sm); flex-shrink:0; }
 .modal-body .playlist-option span { font-size:0.875rem; }
 .modal-footer { padding:12px 20px; border-top:1px solid var(--border); }
-.modal-create-btn { width:100%; padding:10px; background:var(--accent); color:#000; border-radius:var(--radius); font-weight:600; font-size:0.7rem; letter-spacing:0.18em; text-transform:uppercase; font-family:'Figtree',sans-serif; transition:background var(--transition); }
+.modal-create-btn { width:100%; padding:10px; background:var(--accent); color:#000; border-radius:var(--radius); font-weight:600; font-size:0.7rem; letter-spacing:0.18em; text-transform:uppercase; font-family:inherit; transition:background var(--transition); }
 .modal-create-btn:hover { background:#FFD700; }
 
 .modal-search-bar { display:flex; align-items:center; gap:10px; background:var(--bg-primary); border:1px solid var(--border); border-radius:var(--radius-sm); padding:8px 14px; margin-bottom:12px; }
 .modal-search-bar:focus-within { border-color:var(--accent); }
 .modal-search-bar svg { width:14px; height:14px; color:var(--text-muted); flex-shrink:0; }
-.modal-search-bar input { flex:1; font-size:0.825rem; font-family:'Figtree',sans-serif; }
+.modal-search-bar input { flex:1; font-size:0.825rem; font-family:inherit; }
 .modal-track-option { display:flex; align-items:center; gap:10px; padding:8px 0; cursor:pointer; transition:color var(--transition); border-bottom:1px solid var(--border); }
 .modal-track-option:last-child { border-bottom:none; }
 .modal-track-option:hover { color:var(--accent); }
@@ -516,22 +515,6 @@ input  { border:none; background:none; color:inherit; font:inherit; outline:none
 @media (max-width: 390px) {
   .player-controls .icon-btn:first-child { display:none; }
   .player-controls { gap:6px; }
-}
-
-/* ===== Portrait Lock ===== */
-.portrait-lock-overlay {
-  display:none;
-  position:fixed; inset:0; z-index:9999;
-  background:var(--bg-primary);
-  flex-direction:column; align-items:center; justify-content:center;
-  gap:20px; color:var(--text-muted);
-}
-.portrait-lock-overlay svg { opacity:.5; }
-.portrait-lock-overlay p { font-size:0.875rem; letter-spacing:0.08em; text-align:center; max-width:240px; }
-/* Fallback CSS — renforcé par JS ci-dessous */
-@media (orientation:landscape) and (hover:none) {
-  .portrait-lock-overlay { display:flex !important; }
-  #app, .now-playing-screen, .options-overlay { visibility:hidden !important; }
 }
 
 /* ===== Library Search Bar ===== */
@@ -658,7 +641,7 @@ input  { border:none; background:none; color:inherit; font:inherit; outline:none
   display:flex; align-items:center; gap:16px;
   padding:14px 20px; cursor:pointer; width:100%;
   text-align:left; background:none; border:none;
-  font-family:'Figtree',sans-serif; color:var(--text-primary);
+  font-family:inherit; color:var(--text-primary);
   font-size:0.875rem; transition:background var(--transition);
 }
 .options-item:hover { background:var(--bg-hover); }
@@ -766,8 +749,53 @@ input  { border:none; background:none; color:inherit; font:inherit; outline:none
   color:var(--text-muted); background:transparent;
   border:1px solid var(--border);
   transition:all var(--transition); cursor:pointer;
-  font-family:'Figtree',sans-serif; vertical-align:middle;
+  font-family:inherit; vertical-align:middle;
 }
 .shuffle-section-btn:hover { color:var(--accent); border-color:var(--accent); background:var(--accent-dim); }
 .shuffle-section-btn.active { color:var(--accent); border-color:var(--accent); background:var(--accent-dim); }
 .shuffle-section-btn svg { width:11px; height:11px; flex-shrink:0; }
+
+.site-links { display:flex; gap:18px; flex-wrap:wrap; margin-top:42px; padding:18px 0; border-top:1px solid var(--border); font-size:.82rem; }
+.site-links a { color:var(--text-secondary); }
+.site-links a:hover, .site-links a:focus-visible { color:var(--accent); }
+
+/* iPhone Safari : éviter le zoom automatique des champs et permettre le zoom utilisateur. */
+@media (max-width: 768px) {
+  input[type="text"], input[type="search"] { font-size:16px; }
+  .nav-btn { min-height:44px; font-size:0.7rem; }
+  .yt-search-btn, .yt-save-btn, .yt-copy-btn { min-width:44px; min-height:44px; }
+  .track-actions .icon-btn { min-width:44px; min-height:44px; }
+}
+
+@media (max-width:600px) {
+  .player-main-row { gap:8px; }
+  .player-track-info { gap:6px; }
+  .player-track-info #playerFavorite { display:none; }
+  .player-controls #btnShuffle, .player-controls #btnRepeat,
+  .player-controls #btnSkipBack, .player-controls #btnSkipFwd { display:none; }
+  .player-controls .icon-btn:not(.play-btn) { width:44px; height:44px; }
+}
+
+@media (orientation:landscape) and (hover:none) and (max-height:500px) {
+  #app { grid-template-rows:minmax(0,1fr) 72px calc(48px + var(--safe-bottom)); }
+  .sidebar { padding-bottom:var(--safe-bottom); }
+  .main-content { padding-top:calc(8px + var(--safe-top)); }
+  .player-bar { padding-top:4px; padding-bottom:4px; }
+  .now-playing-screen { padding-top:calc(8px + var(--safe-top)); }
+  .now-playing-artwork-wrap { width:96px; height:96px; margin-bottom:8px; }
+  .now-playing-controls { margin-bottom:4px; }
+}
+
+:where(button, a, input, [tabindex]):focus-visible {
+  outline:2px solid var(--accent);
+  outline-offset:2px;
+}
+
+@media (prefers-reduced-motion:reduce) {
+  *, *::before, *::after {
+    animation-duration:0.01ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:0.01ms !important;
+    scroll-behavior:auto !important;
+  }
+}

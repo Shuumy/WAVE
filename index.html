@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 
   <!--
     ╔══════════════════════════════════════════════════════════════════╗
@@ -28,12 +28,8 @@
       https://cdnjs.cloudflare.com
       https://www.youtube.com
       https://s.ytimg.com;
-    style-src 'self'
-      https://fonts.googleapis.com
-      'unsafe-inline';
-    font-src
-      https://fonts.gstatic.com
-      data:;
+    style-src 'self' 'unsafe-inline';
+    font-src 'self' data:;
     img-src 'self'
       data:
       blob:
@@ -42,13 +38,24 @@
       blob:
       https:;
     frame-src https://www.youtube.com https://www.youtube-nocookie.com;
-    connect-src 'self' https://wave-docker.onrender.com https://fonts.googleapis.com http://127.0.0.1:8765 http://localhost:8765;
+    connect-src 'self' https://wave-docker.onrender.com http://127.0.0.1:8765 http://localhost:8765;
     worker-src 'self';
     manifest-src 'self';
   ">
 
-  <meta name="description" content="WAVE — Chaque note est une onde">
+  <meta name="description" content="WAVE : écoute ta musique, importe tes fichiers audio, crée des playlists et note tes morceaux. Ta bibliothèque reste sur ton appareil.">
+  <link rel="canonical" href="https://shuumy.github.io/WAVE/">
+  <link rel="sitemap" type="application/xml" href="./sitemap.xml">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="fr_FR">
+  <meta property="og:site_name" content="WAVE">
+  <meta property="og:title" content="WAVE — Ta bibliothèque musicale personnelle">
+  <meta property="og:description" content="Importe tes morceaux, crée des playlists et retrouve tes favoris sur ton appareil.">
+  <meta property="og:url" content="https://shuumy.github.io/WAVE/">
+  <meta property="og:image" content="https://shuumy.github.io/WAVE/assets/icons/icon-512-v2.png">
+  <meta name="twitter:card" content="summary">
   <meta name="theme-color" content="#0A0A0A">
+  <meta name="referrer" content="no-referrer">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="WAVE">
@@ -60,8 +67,9 @@
   <link rel="apple-touch-icon" href="./assets/icons/icon-180-v2.png">
   <link rel="apple-touch-icon" sizes="180x180" href="./assets/icons/icon-180-v2.png">
   <link rel="apple-touch-startup-image" href="./assets/icons/icon-512-v2.png">
-  <title>WAVE</title>
+  <title>WAVE — Ta bibliothèque musicale personnelle</title>
   <link rel="stylesheet" href="./css/style.css">
+  <link rel="stylesheet" href="./css/ratings.css">
 </head>
 <body>
   <div id="app">
@@ -108,10 +116,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
         <!-- accept limité aux types raster — SVG exclu (peut contenir du JS) -->
-        <div class="profile-avatar" id="profileAvatar" title="Photo de profil">
+        <button class="profile-avatar" id="profileAvatar" type="button" aria-label="Changer la photo de profil" title="Photo de profil">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-          <input type="file" id="profileInput" accept="image/jpeg,image/png,image/gif,image/webp" hidden>
-        </div>
+        </button>
+        <input type="file" id="profileInput" accept="image/jpeg,image/png,image/gif,image/webp" hidden>
       </div>
 
       <!-- ACCUEIL -->
@@ -128,13 +136,13 @@
       <!-- RECHERCHER -->
       <section class="view" id="viewSearch">
         <h2 class="view-title">Rechercher</h2>
-        <p class="view-subtitle">Recherche et écoute sur YouTube</p>
+        <p class="view-subtitle">Recherche et écoute sur YouTube. Sur iPhone, importe tes propres fichiers pour les conserver hors ligne.</p>
         <div class="yt-search-bar">
           <svg viewBox="0 0 24 24" fill="#ff0000" width="16" height="16" style="flex-shrink:0">
             <path d="M23.5 6.2c-.3-1-1-1.8-2-2.1C19.6 3.5 12 3.5 12 3.5s-7.6 0-9.5.6c-1 .3-1.7 1.1-2 2.1C0 8.1 0 12 0 12s0 3.9.5 5.8c.3 1 1 1.8 2 2.1 1.9.6 9.5.6 9.5.6s7.6 0 9.5-.6c1-.3 1.7-1.1 2-2.1.5-1.9.5-5.8.5-5.8s0-3.9-.5-5.8zM9.5 15.6V8.4l6.3 3.6-6.3 3.6z"/>
           </svg>
-          <input type="text" id="ytSearchInput" placeholder="Rechercher sur YouTube..." autocomplete="off" maxlength="200">
-          <button class="yt-search-btn" id="ytSearchBtn">
+          <input type="search" id="ytSearchInput" placeholder="Rechercher sur YouTube..." aria-label="Rechercher sur YouTube" autocomplete="off" maxlength="200">
+          <button class="yt-search-btn" id="ytSearchBtn" aria-label="Lancer la recherche YouTube">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           </button>
         </div>
@@ -146,12 +154,13 @@
         <h2 class="view-title">Bibliothèque</h2>
         <div class="search-bar library-search-bar" id="librarySearchBar" style="margin-bottom:16px">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" id="librarySearchInput" placeholder="Rechercher dans la bibliothèque..." autocomplete="off" maxlength="200">
+          <input type="search" id="librarySearchInput" placeholder="Rechercher dans la bibliothèque..." aria-label="Rechercher dans la bibliothèque" autocomplete="off" maxlength="200">
           <button class="library-search-clear" id="librarySearchClear" hidden aria-label="Effacer">✕</button>
         </div>
         <div class="library-tabs">
           <button class="tab-btn active" data-tab="all">Tout</button>
           <button class="tab-btn" data-tab="favorites">Favoris</button>
+          <button class="tab-btn" data-tab="rated">Notés</button>
           <button class="tab-btn" data-tab="playlists">Playlists</button>
         </div>
         <div id="libraryContent">
@@ -204,6 +213,10 @@
           <span class="notube-external-arrow" aria-hidden="true">›</span>
         </a>
       </section>
+      <nav class="site-links" aria-label="Informations sur WAVE">
+        <a href="./confidentialite.html">Confidentialité</a>
+        <a href="./conditions.html">Informations légales et conditions</a>
+      </nav>
     </main>
 
     <!-- Multi-select Bar -->
@@ -367,12 +380,6 @@
     </div>
   </div>
 
-  <!-- Portrait Lock Overlay -->
-  <div class="portrait-lock-overlay" id="portraitLockOverlay">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
-    <p>Tourne ton téléphone en mode portrait</p>
-  </div>
-
   <!-- Toast -->
   <div class="toast" id="toast" hidden><span id="toastMessage"></span></div>
 
@@ -425,28 +432,12 @@
   <input type="file" id="playlistCoverInput" accept="image/jpeg,image/png,image/gif,image/webp" hidden>
   <div id="ytPlayerContainer" style="position:absolute;width:0;height:0;overflow:hidden;pointer-events:none;"><div id="ytPlayer"></div></div>
 
-  <!--
-    ══════════════════════════════════════════════════════════════
-    SUBRESOURCE INTEGRITY (SRI)
-    Pour calculer le hash de jsmediatags, exécute :
-      curl -sL https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js \
-        | openssl dgst -sha384 -binary | openssl base64 -A
-    Puis ajoute : integrity="sha384-RESULTAT" à la balise script.
-
-    ⚠ L'API YouTube iframe_api ne supporte pas SRI car elle charge
-    dynamiquement des sous-scripts depuis plusieurs sous-domaines.
-    ══════════════════════════════════════════════════════════════
-  -->
-  <script
-    src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"
-    crossorigin="anonymous"
-    referrerpolicy="no-referrer">
-  </script>
-  <script src="https://www.youtube.com/iframe_api"></script>
+  <!-- Les bibliothèques externes sont chargées uniquement lors de leur utilisation. -->
   <script src="./js/db.js"></script>
   <script src="./js/tracks.js"></script>
   <script src="./js/player.js"></script>
   <script src="./js/samsung-bridge.js"></script>
   <script src="./js/app.js"></script>
+  <script src="./js/ratings.js"></script>
 </body>
 </html>

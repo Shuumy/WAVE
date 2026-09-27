@@ -33,7 +33,7 @@
     if (!url || typeof url !== 'string') return '';
     try {
       const u = new URL(url);
-      if (!['https:', 'http:', 'data:', 'blob:'].includes(u.protocol)) return '';
+      if (!['https:', 'data:', 'blob:'].includes(u.protocol)) return '';
       // Bloquer les data: URLs autres qu'image (pour les thumbnails externes)
       if (u.protocol === 'data:' && !url.startsWith('data:image/')) return '';
       return url;
@@ -380,7 +380,24 @@
   }
 
   // ===== Extraction complète des métadonnées (ID3 + fallback nom de fichier) =====
-  function extractAllMetadata(file) {
+  let metadataScriptPromise;
+  function loadMetadataReader() {
+    if (window.jsmediatags) return Promise.resolve();
+    if (!metadataScriptPromise) metadataScriptPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js';
+      script.integrity = 'sha384-JpTt7qxVx1X/pHeYiCfqFdKRu2HF1MBGr1kEXtbNIGwwryGWMbbW78onU3bdkAHZ';
+      script.crossOrigin = 'anonymous';
+      script.referrerPolicy = 'no-referrer';
+      script.onload = resolve;
+      script.onerror = reject;
+      document.head.appendChild(script);
+    }).catch(() => { metadataScriptPromise = null; });
+    return metadataScriptPromise;
+  }
+
+  async function extractAllMetadata(file) {
+    await loadMetadataReader();
     const { title: nameTitle, artist: nameArtist } = parseName(file.name);
     return new Promise((resolve) => {
       const fallback = { title: nameTitle, artist: nameArtist, album: '', genre: '', releaseYear: null, coverArt: null };
@@ -1400,17 +1417,16 @@
 
   window.addEventListener('pageshow', () => {
     syncYTAPIState();
-    ensureYTAPIScript();
   });
 
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
       syncYTAPIState();
-      ensureYTAPIScript();
     }
   });
 
   const WAVE_API_BASE_URL = 'https://wave-docker.onrender.com';
+  const canSaveYouTubeOffline = /Android/i.test(navigator.userAgent);
 
   function getVideoId(item) {
     if (item.videoId) return item.videoId;
@@ -1441,6 +1457,13 @@
   async function playYouTubeVideo(index) {
     const item = ytSearchResults[index]; if (!item) return;
     const videoId = getVideoId(item);
+    if (!videoId) { showToast('Vidéo indisponible'); return; }
+    if (!canSaveYouTubeOffline || !syncYTAPIState()) {
+      // Le lecteur YouTube caché est peu fiable sur iOS : ouvrir la page officielle.
+      window.open(`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`, '_blank', 'noopener,noreferrer');
+      showToast('Lecture ouverte sur YouTube');
+      return;
+    }
     // ⚠️ SÉCURITÉ : Sanitiser le thumbnail avant utilisation
     const rawThumb = item.thumbnail || '';
     const thumb = sanitizeURL(rawThumb) || '';
@@ -1582,11 +1605,11 @@
           <div class="yt-result-channel">${esc(item.uploaderName||'')}</div>
         </div>
         <div class="yt-result-actions">
-          <button class="yt-save-btn${saved?' yt-saved':''}" data-index="${i}" title="${saved?'Déjà sauvegardé':'Sauvegarder hors-ligne'}">
+          ${canSaveYouTubeOffline ? `<button class="yt-save-btn${saved?' yt-saved':''}" data-index="${i}" title="${saved?'Déjà sauvegardé':'Sauvegarder hors-ligne'}" aria-label="${saved?'Déjà sauvegardé':'Sauvegarder hors ligne'}">
             ${saved ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>'
                     : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'}
-          </button>
-          <button class="yt-copy-btn" data-index="${i}" title="Copier le lien">
+          </button>` : `<a class="yt-save-btn yt-external-btn" href="https://www.youtube.com/watch?v=${encodeURIComponent(videoId || '')}" target="_blank" rel="noopener noreferrer" aria-label="Ouvrir sur YouTube" title="Ouvrir sur YouTube">↗</a>`}
+          <button class="yt-copy-btn" data-index="${i}" title="Copier le lien" aria-label="Copier le lien YouTube">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           </button>
         </div>
@@ -1652,6 +1675,8 @@
   async function doYTSearch() {
     const q = ytSearchInput.value.trim();
     if (!q) { showToast('Tape quelque chose à rechercher'); return; }
+    // Le lecteur tiers ne se charge qu'après une recherche volontaire.
+    if (canSaveYouTubeOffline) ensureYTAPIScript();
     ytResultsContainer.innerHTML = '<div class="yt-loading"><div class="spinner"></div></div>';
     try { renderYTResults(await searchYouTube(q)); }
     catch(err) {
@@ -1668,44 +1693,8 @@
     catch(e) { /* SW optionnel — échec silencieux */ }
   }
 
-  // ===== Portrait Lock =====
-  // iOS ne supporte pas screen.orientation.lock() — on utilise JS pur.
-  // On cible uniquement les appareils mobiles (plus petite dimension ≤ 600px).
-  const _plOverlay = document.getElementById('portraitLockOverlay');
-  const _appEl     = document.getElementById('app');
-
-  function _isMobile() {
-    return Math.min(screen.width, screen.height) <= 600;
-  }
-  function _applyPortraitLock() {
-    if (!_isMobile()) return;
-    const landscape = window.innerWidth > window.innerHeight;
-    _plOverlay.style.display         = landscape ? 'flex'   : '';
-    if (_appEl) _appEl.style.visibility = landscape ? 'hidden' : '';
-    // Bloquer le scroll quand l'overlay est actif
-    document.body.style.overflow = landscape ? 'hidden' : '';
-  }
-
-  window.addEventListener('resize', _applyPortraitLock, { passive: true });
-  // orientationchange est parfois décalé sur iOS → petit délai
-  window.addEventListener('orientationchange', () => {
-    setTimeout(_applyPortraitLock, 80);
-  }, { passive: true });
-  _applyPortraitLock(); // vérification immédiate au chargement
-
-  // Verrouillage natif (Android Chrome PWA installée, ignoré silencieusement sur iOS)
-  if (screen.orientation && screen.orientation.lock) {
-    screen.orientation.lock('portrait').catch(() => {});
-  }
-  document.addEventListener('touchstart', function retryLock() {
-    if (screen.orientation && screen.orientation.lock) {
-      screen.orientation.lock('portrait').catch(() => {});
-    }
-  }, { once: true, passive: true });
-
   // ===== Init =====
   syncYTAPIState();
-  ensureYTAPIScript();
   await loadUserTracks();
   await loadProfilePicture();
   refreshHomeView();

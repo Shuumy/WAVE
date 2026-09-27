@@ -1,9 +1,10 @@
-// WAVE service worker — cache applicatif et injection des extensions natives
-const CACHE_NAME = 'wave-v21';
-const LOCAL_BRIDGE_ORIGINS = ['http://127.0.0.1:8765', 'http://localhost:8765'];
+// WAVE service worker — fichiers de l'application disponibles hors ligne.
+const CACHE_NAME = 'wave-v22';
 const ASSETS = [
   './', './index.html', './css/style.css', './css/ratings.css', './js/db.js', './js/tracks.js',
   './js/player.js', './js/samsung-bridge.js', './js/app.js', './js/ratings.js', './manifest.json',
+  './assets/icons/icon-192-v2.png', './assets/icons/icon-512-v2.png', './assets/icons/favicon.svg',
+  './confidentialite.html', './conditions.html', './css/info.css', './404.html',
 ];
 
 self.addEventListener('install', event => {
@@ -13,7 +14,7 @@ self.addEventListener('install', event => {
 
 self.addEventListener('activate', event => {
   event.waitUntil(caches.keys().then(keys => Promise.all(
-    keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))
+    keys.filter(key => key.startsWith('wave-v') && key !== CACHE_NAME).map(key => caches.delete(key))
   )));
   self.clients.claim();
 });
@@ -43,66 +44,15 @@ self.addEventListener('fetch', event => {
 });
 
 async function loadAppShell(request) {
-  let response;
   try {
-    response = await fetch(request, { cache: 'no-cache' });
+    const response = await fetch(request, { cache: 'no-cache' });
     if (response.ok) {
       const cache = await caches.open(CACHE_NAME);
-      await cache.put('./index.html', response.clone());
+      await cache.put(request, response.clone());
     }
+    return response;
   } catch {
-    response = await caches.match('./index.html');
+    return await caches.match(request) || await caches.match('./index.html') ||
+      new Response('WAVE indisponible hors ligne', { status: 503 });
   }
-
-  if (!response) return new Response('WAVE indisponible hors ligne', { status: 503 });
-  const contentType = response.headers.get('content-type') || '';
-  if (!contentType.includes('text/html')) return response;
-
-  let html = await response.text();
-  const localSources = LOCAL_BRIDGE_ORIGINS.join(' ');
-
-  if (!LOCAL_BRIDGE_ORIGINS.every(origin => html.includes(origin))) {
-    html = html.replace(
-      "connect-src 'self' https://wave-docker.onrender.com https://fonts.googleapis.com;",
-      `connect-src 'self' https://wave-docker.onrender.com https://fonts.googleapis.com ${localSources};`
-    );
-  }
-
-  if (!html.includes('./css/ratings.css')) {
-    html = html.replace(
-      '<link rel="stylesheet" href="./css/style.css">',
-      '<link rel="stylesheet" href="./css/style.css">\n  <link rel="stylesheet" href="./css/ratings.css">'
-    );
-  }
-
-  if (!html.includes('data-tab="rated"')) {
-    html = html.replace(
-      '<button class="tab-btn" data-tab="favorites">Favoris</button>',
-      '<button class="tab-btn" data-tab="favorites">Favoris</button>\n          <button class="tab-btn" data-tab="rated">Notés</button>'
-    );
-  }
-
-  if (!html.includes('./js/samsung-bridge.js')) {
-    html = html.replace(
-      '<script src="./js/app.js"></script>',
-      '<script src="./js/samsung-bridge.js"></script>\n  <script src="./js/app.js"></script>'
-    );
-  }
-
-  if (!html.includes('./js/ratings.js')) {
-    html = html.replace(
-      '<script src="./js/app.js"></script>',
-      '<script src="./js/app.js"></script>\n  <script src="./js/ratings.js"></script>'
-    );
-  }
-
-  const headers = new Headers(response.headers);
-  headers.set('content-type', 'text/html; charset=utf-8');
-  headers.delete('content-length');
-
-  return new Response(html, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
 }
