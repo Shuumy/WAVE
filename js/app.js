@@ -3,6 +3,8 @@
  * SÉCURITÉ : XSS échappé, URLs sanitisées, tailles limitées, types validés.
  */
 (async () => {
+  // Safari iOS peut signaler une hauteur dvh réduite pour une web app installée.
+  if (navigator.standalone === true) document.documentElement.classList.add('ios-standalone');
   await DB.open();
 
   const $ = (sel) => document.querySelector(sel);
