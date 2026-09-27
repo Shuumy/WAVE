@@ -194,9 +194,44 @@
   const settingsBtn     = $('#settingsBtn');
   const settingsOverlay = $('#settingsOverlay');
   const closeSettingsBtn= $('#closeSettingsBtn');
-  settingsBtn.addEventListener('click', () => { settingsOverlay.hidden = false; });
+  const settingsMain = $('#settingsMain');
+  const settingsPanel = $('#settingsPanel');
+  const settingsPanelTitle = $('#settingsPanelTitle');
+  const settingsPanelContent = $('#settingsPanelContent');
+  function setTheme(theme) {
+    document.documentElement.dataset.theme = theme;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'light' ? '#fafafa' : '#0a0a0a');
+    $$('.settings-theme-choice').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.theme === theme)));
+  }
+  DB.getSetting('theme').then(theme => setTheme(theme === 'light' ? 'light' : 'dark'));
+  settingsBtn.addEventListener('click', () => {
+    settingsMain.hidden = false; settingsPanel.hidden = true;
+    settingsOverlay.hidden = false;
+  });
   closeSettingsBtn.addEventListener('click', () => { settingsOverlay.hidden = true; });
   settingsOverlay.addEventListener('click', (e) => { if (e.target === settingsOverlay) settingsOverlay.hidden = true; });
+  $('#settingsBack').addEventListener('click', () => { settingsPanel.hidden = true; settingsMain.hidden = false; });
+  $$('.settings-entry').forEach(entry => entry.addEventListener('click', () => {
+    const panel = entry.dataset.settingsPanel;
+    settingsPanelTitle.textContent = entry.querySelector('strong').textContent;
+    settingsPanelContent.innerHTML = '';
+    if (panel === 'appearance') {
+      for (const [theme, label] of [['light','Jour (clair)'], ['dark','Nuit (sombre)']]) {
+        const button = document.createElement('button');
+        button.type = 'button'; button.className = 'settings-theme-choice';
+        button.dataset.theme = theme; button.textContent = label;
+        button.addEventListener('click', async () => { setTheme(theme); await DB.setSetting('theme', theme); });
+        settingsPanelContent.appendChild(button);
+      }
+      setTheme(document.documentElement.dataset.theme || 'dark');
+    } else if (panel === 'legal') {
+      for (const [label, href] of [['Confidentialité', './confidentialite.html'], ['Informations légales et conditions d’utilisation', './conditions.html']]) {
+        const link = document.createElement('a'); link.className = 'settings-legal-link';
+        link.href = href; link.textContent = label; settingsPanelContent.appendChild(link);
+      }
+    }
+    settingsMain.hidden = true; settingsPanel.hidden = false;
+  }));
 
   // ===== Profile Picture =====
   async function loadProfilePicture() {
@@ -211,6 +246,67 @@
   }
 
   profileAvatar.addEventListener('click', () => profileInput.click());
+
+  const cropOverlay = $('#profileCropOverlay');
+  const cropStage = $('#cropStage');
+  const cropImage = $('#cropImage');
+  const cropZoom = $('#cropZoom');
+  let cropSource = null;
+  let cropOffset = { x:0, y:0 };
+  let cropRotation = 0;
+  function cropScale() {
+    if (!cropSource) return 1;
+    const turned = cropRotation % 180 !== 0;
+    return cropStage.clientWidth / Math.min(turned ? cropSource.naturalHeight : cropSource.naturalWidth, turned ? cropSource.naturalWidth : cropSource.naturalHeight) * Number(cropZoom.value);
+  }
+  function updateCrop() {
+    if (!cropSource) return;
+    const scale = cropScale();
+    const side = cropStage.clientWidth;
+    const turned = cropRotation % 180 !== 0;
+    const width = (turned ? cropSource.naturalHeight : cropSource.naturalWidth) * scale;
+    const height = (turned ? cropSource.naturalWidth : cropSource.naturalHeight) * scale;
+    cropOffset.x = Math.max((side-width)/2, Math.min((width-side)/2, cropOffset.x));
+    cropOffset.y = Math.max((side-height)/2, Math.min((height-side)/2, cropOffset.y));
+    cropImage.style.width = `${cropSource.naturalWidth * scale}px`;
+    cropImage.style.height = `${cropSource.naturalHeight * scale}px`;
+    cropImage.style.transform = `translate(-50%, -50%) translate(${cropOffset.x}px, ${cropOffset.y}px) rotate(${cropRotation}deg)`;
+  }
+  function closeCrop() { cropOverlay.hidden = true; cropSource = null; cropImage.removeAttribute('src'); }
+  $('#cropCancel').addEventListener('click', closeCrop);
+  $('#cropRotate').addEventListener('click', () => { cropRotation = (cropRotation + 90) % 360; cropOffset = { x:0, y:0 }; updateCrop(); });
+  cropZoom.addEventListener('input', updateCrop);
+  let lastPointer = null;
+  cropStage.addEventListener('pointerdown', e => {
+    if (!cropSource) return;
+    lastPointer = { id:e.pointerId, x:e.clientX, y:e.clientY };
+    cropStage.setPointerCapture(e.pointerId);
+  });
+  cropStage.addEventListener('pointermove', e => {
+    if (!lastPointer || lastPointer.id !== e.pointerId) return;
+    cropOffset.x += e.clientX - lastPointer.x; cropOffset.y += e.clientY - lastPointer.y;
+    lastPointer.x = e.clientX; lastPointer.y = e.clientY; updateCrop();
+  });
+  cropStage.addEventListener('pointerup', () => { lastPointer = null; });
+  cropStage.addEventListener('pointercancel', () => { lastPointer = null; });
+  $('#cropSave').addEventListener('click', async () => {
+    if (!cropSource) return;
+    const side = cropStage.clientWidth;
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+    ctx.beginPath(); ctx.arc(256,256,256,0,Math.PI*2); ctx.clip();
+    ctx.translate(256 + cropOffset.x * 512/side, 256 + cropOffset.y * 512/side);
+    ctx.rotate(cropRotation * Math.PI/180);
+    ctx.scale(cropScale() * 512/side, cropScale() * 512/side);
+    ctx.drawImage(cropSource, -cropSource.naturalWidth/2, -cropSource.naturalHeight/2);
+    const dataUrl = canvas.toDataURL('image/png');
+    try {
+      await DB.setSetting('profilePicture', dataUrl);
+      const img = document.createElement('img'); img.src = dataUrl; img.alt = 'Profil';
+      profileAvatar.replaceChildren(img);
+      closeCrop(); showToast('Photo mise à jour');
+    } catch { showToast('Impossible d’enregistrer la photo'); }
+  });
 
   profileInput.addEventListener('change', async () => {
     const file = profileInput.files[0];
@@ -231,20 +327,21 @@
     }
 
     const reader = new FileReader();
-    reader.onload = async (e) => {
+    reader.onload = (e) => {
       const dataUrl = e.target.result;
       // Vérifier que c'est bien une data:image/ URL
       if (!dataUrl.startsWith('data:image/')) {
         showToast('Format d\'image invalide.');
         return;
       }
-      await DB.setSetting('profilePicture', dataUrl);
-      const img = document.createElement('img');
+      const img = new Image();
+      img.onload = () => {
+        cropSource = img; cropImage.src = dataUrl;
+        cropRotation = 0; cropOffset = { x:0, y:0 }; cropZoom.value = '1';
+        cropOverlay.hidden = false; updateCrop();
+      };
+      img.onerror = () => showToast('Image illisible');
       img.src = dataUrl;
-      img.alt = 'Profil';
-      profileAvatar.innerHTML = '';
-      profileAvatar.appendChild(img);
-      showToast('Photo mise à jour');
     };
     reader.readAsDataURL(file);
     profileInput.value = '';
@@ -451,6 +548,7 @@
   const optionsArtist  = $('#optionsArtist');
 
   function showTrackOptions(track, ctx = {}) {
+    optionsOverlay.dataset.context = 'track';
     // Artwork
     const artSrc = sanitizeURL(generateArtwork(track)) || generateArtwork(track);
     optionsArtwork.innerHTML = '';
@@ -474,6 +572,9 @@
 
     addItem('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>',
       'Ajouter à une playlist', '', () => openPlaylistModal(track.id));
+
+    addItem('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+      'Modifier les informations', '', () => openTrackEdit(track));
 
     // Retirer de la playlist / Supprimer
     if (ctx.playlistId) {
@@ -537,8 +638,118 @@
     optionsOverlay.hidden = false;
   }
 
+  function showPlaylistOptions(pl) {
+    optionsOverlay.dataset.context = 'playlist';
+    optionsArtwork.innerHTML = '';
+    if (pl.coverImage) {
+      const img = document.createElement('img'); img.src = sanitizeURL(pl.coverImage); img.alt = '';
+      optionsArtwork.appendChild(img);
+    }
+    optionsTitle.textContent = pl.name;
+    optionsArtist.textContent = 'Playlist';
+    optionsList.innerHTML = '';
+    const option = (label, icon, action, danger = false) => {
+      const button = document.createElement('button');
+      button.className = 'options-item' + (danger ? ' danger' : '');
+      button.innerHTML = icon;
+      const span = document.createElement('span'); span.textContent = label; button.appendChild(span);
+      button.addEventListener('click', () => { closeOptionsSheet(); action(); });
+      optionsList.appendChild(button);
+    };
+    option('Renommer la playlist', '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>', async () => {
+      const name = validatePlaylistName(prompt('Nouveau nom :', pl.name));
+      if (!name || name === pl.name) return;
+      pl.name = name; await DB.updatePlaylist(pl);
+      showToast('Playlist renommée'); renderPlaylistDetail(pl.id);
+    });
+    option('Supprimer la playlist', '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>', async () => {
+      if (!await showConfirm(`Supprimer la playlist « ${pl.name} » ?`)) return;
+      await DB.deletePlaylist(pl.id);
+      currentPlaylistView = null; showToast('Playlist supprimée'); refreshLibraryView();
+    }, true);
+    optionsOverlay.hidden = false;
+  }
+
   function closeOptionsSheet() { optionsOverlay.hidden = true; }
   optionsOverlay.addEventListener('click', (e) => { if (e.target === optionsOverlay) closeOptionsSheet(); });
+
+  const trackEditModal = $('#trackEditModal');
+  const trackEditForm = $('#trackEditForm');
+  const trackEditCover = $('#trackEditCover');
+  const trackEditPreview = $('#trackEditPreview');
+  let editingTrack = null;
+  let editedCover = null;
+  let coverReadPromise = null;
+  let coverToken = 0;
+  function closeTrackEdit() {
+    coverToken++;
+    trackEditModal.hidden = true; editingTrack = null;
+    trackEditForm.reset();
+  }
+  function openTrackEdit(track) {
+    coverToken++;
+    editingTrack = track;
+    editedCover = track.coverArt || null;
+    coverReadPromise = null;
+    $('#trackEditTitle').value = track.title;
+    $('#trackEditArtist').value = track.artist;
+    trackEditCover.value = '';
+    trackEditPreview.src = sanitizeURL(generateArtwork(track));
+    trackEditModal.hidden = false;
+    $('#trackEditTitle').focus();
+  }
+  $('#trackEditClose').addEventListener('click', closeTrackEdit);
+  trackEditModal.addEventListener('click', e => { if (e.target === trackEditModal) closeTrackEdit(); });
+  $('#trackEditRemoveCover').addEventListener('click', () => {
+    if (!editingTrack) return;
+    coverToken++; coverReadPromise = null;
+    editedCover = null; trackEditCover.value = '';
+    trackEditPreview.src = sanitizeURL(generateArtwork({ ...editingTrack, coverArt:null }));
+  });
+  trackEditCover.addEventListener('change', async () => {
+    const file = trackEditCover.files[0]; if (!file) return;
+    const token = ++coverToken;
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type) || file.size > MAX_IMAGE_SIZE) {
+      showToast('Utilise une image JPG, PNG, GIF ou WebP de moins de 5 Mo.');
+      trackEditCover.value = ''; return;
+    }
+    try {
+      coverReadPromise = new Promise((resolve, reject) => {
+        const reader = new FileReader(); reader.onload = () => resolve(reader.result);
+        reader.onerror = reject; reader.readAsDataURL(file);
+      });
+      const dataUrl = await coverReadPromise;
+      if (!editingTrack || token !== coverToken) return;
+      if (!dataUrl.startsWith('data:image/')) throw new Error('Image invalide');
+      editedCover = dataUrl; trackEditPreview.src = dataUrl;
+    } catch { if (token === coverToken) { coverReadPromise = null; showToast('Image illisible'); } }
+  });
+  trackEditForm.addEventListener('submit', async e => {
+    e.preventDefault(); if (!editingTrack) return;
+    if (coverReadPromise) {
+      try { await coverReadPromise; } catch { showToast('Image illisible'); return; }
+    }
+    const title = $('#trackEditTitle').value.trim();
+    const artist = $('#trackEditArtist').value.trim();
+    if (!title || !artist) { showToast('Indique un titre et un artiste.'); return; }
+    const changes = { title, artist, coverArt:editedCover };
+    try {
+      await DB.updateUserTrack(editingTrack.id, changes);
+      Object.assign(editingTrack, changes);
+      const current = Player.getCurrentTrack();
+      if (current?.id === editingTrack.id) {
+        Object.assign(current, changes);
+        playerTitle.textContent = nowPlayingTitle.textContent = title;
+        playerArtist.textContent = nowPlayingArtist.textContent = artist;
+        for (const host of [playerArtwork, nowPlayingArtwork]) {
+          const img = document.createElement('img'); img.src = sanitizeURL(generateArtwork(current)); img.alt = '';
+          host.replaceChildren(img);
+        }
+        if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title, artist, album:current.album || '' });
+      }
+      closeTrackEdit(); refreshAllViews(); showToast('Morceau mis à jour');
+    } catch { showToast('Impossible de modifier le morceau'); }
+  });
 
   // ===== Track Element =====
   /**
@@ -794,7 +1005,6 @@
       const coverSrc = pl.coverImage ? sanitizeURL(pl.coverImage) || '' : '';
       const hasCover = !!coverSrc;
       html += `<div class="playlist-card${hasCover ? ' has-cover' : ''}" style="background:${esc(pl.coverColor)}" data-playlist-id="${esc(pl.id)}">
-        <button class="playlist-card-delete" data-pl-delete="${esc(pl.id)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         ${hasCover ? `<img class="playlist-card-cover-img" src="${esc(coverSrc)}" alt="">` : ''}
         <div class="playlist-card-info">
           <div class="playlist-card-name">${esc(pl.name)}</div>
@@ -806,17 +1016,7 @@
     content.innerHTML = html;
     content.querySelectorAll('.playlist-card').forEach(card => {
       card.addEventListener('click', (e) => {
-        if (e.target.closest('.playlist-card-delete')) return;
         currentPlaylistView = card.dataset.playlistId; refreshLibraryView();
-      });
-    });
-    content.querySelectorAll('[data-pl-delete]').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const ok = await showConfirm('Supprimer cette playlist ?');
-        if (!ok) return;
-        await DB.deletePlaylist(btn.dataset.plDelete);
-        showToast('Playlist supprimée'); renderPlaylistsGrid();
       });
     });
     $('#createPlaylistFromLib').addEventListener('click', async () => {
@@ -848,7 +1048,7 @@
         <div class="playlist-detail-info">
           <h3>
             <span id="playlistNameSpan"></span>
-            <button class="playlist-rename-btn" id="playlistRenameBtn" title="Renommer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+            <button class="playlist-menu-btn icon-btn" id="playlistMenuBtn" aria-label="Options de la playlist" title="Options"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg></button>
           </h3>
           <p>${tracks.length} morceau${tracks.length!==1?'x':''} · ${formatTotalDuration(totalSec)}</p>
           <div class="playlist-detail-actions">
@@ -876,13 +1076,7 @@
       renderSortRow($('#playlistSortZone'), playlistSort, () => renderPlaylistDetail(plId));
     }
     $('#playlistBack').addEventListener('click', () => { currentPlaylistView = null; refreshLibraryView(); });
-    $('#playlistRenameBtn').addEventListener('click', async () => {
-      const raw = prompt('Nouveau nom:', pl.name);
-      const n = validatePlaylistName(raw);
-      if (!n || n === pl.name) return;
-      pl.name = n; await DB.updatePlaylist(pl);
-      showToast('Playlist renommée'); renderPlaylistDetail(plId);
-    });
+    $('#playlistMenuBtn').addEventListener('click', () => showPlaylistOptions(pl));
     $('#playlistCoverBtn').addEventListener('click', () => { playlistCoverInput.dataset.playlistId = plId; playlistCoverInput.click(); });
     $('#playlistShuffleBtn').addEventListener('click', () => shufflePlay(tracks));
     $('#playlistAddTracksBtn').addEventListener('click', () => openPlaylistSearchModal(plId));
