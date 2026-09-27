@@ -5,7 +5,7 @@
 | # | Point de la vidéo | Traitement dans cette branche |
 |---|---|---|
 | 1 | Page RGPD | `confidentialite.html` décrit le stockage local et les services tiers. Shuumy et son contact sont renseignés. La page reste `noindex` en attente d’une revue juridique adaptée au statut de l’éditeur. |
-| 2 | CGU | `conditions.html` décrit l’usage des contenus, le stockage local et les services externes. Shuumy et son contact sont renseignés ; même réserve de revue juridique. |
+| 2 | CGU | `conditions.html` décrit l’usage des contenus, le stockage local et les services externes. Le caractère personnel du projet, Shuumy, son contact et l’adresse publiée par GitHub pour l’hébergeur y figurent. Une vérification juridique reste nécessaire. |
 | 3 | API hors front-end | La recherche utilise déjà `backend/main.py` sur Render. Le navigateur ne contient pas de clé API ; la bibliothèque est dans IndexedDB. |
 | 4 | Forcer HTTPS | Vérifié sur le site publié : HTTP renvoie 301 vers HTTPS et HTTPS envoie `Strict-Transport-Security`. C’est géré par GitHub Pages. Le pont Termux Android sur `127.0.0.1` n’est pas appelé sur iPhone. |
 | 5 | Bandeau cookies | Pas de traceur WAVE au chargement : les scripts YouTube et cdnjs sont désormais différés. Ne pas ajouter de faux bandeau. Une vraie gestion du consentement sera nécessaire si des traceurs non essentiels sont introduits. |
@@ -35,6 +35,6 @@
 
 ## Avant publication
 
-1. Les coordonnées fournies figurent désormais dans les deux pages. Vérifier si le pseudonyme Shuumy et les autres mentions suffisent selon le statut et l’activité du site ; revoir les pages avant de retirer leur `noindex`.
+1. Les coordonnées fournies figurent dans les deux pages et le projet est déclaré personnel sans activité commerciale. La possibilité de conserver l’anonymat dépend notamment de la communication des éléments d’identification personnelle à l’hébergeur (article 1-1 II de la LCEN) : vérifier ce point dans le compte d’hébergement, puis revoir les pages avant de retirer leur `noindex`.
 2. Vérifier l’état de GitHub Pages après fusion et soumettre `https://shuumy.github.io/WAVE/sitemap.xml` dans Search Console si le référencement est souhaité.
 3. Tester Safari sur un iPhone 15 : portrait et paysage, zoom, import depuis Fichiers, lecture locale, notation, fermeture/réouverture, hors ligne, suppression des données du site.
