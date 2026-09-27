@@ -111,7 +111,7 @@
   let currentPlaylistView = null;
   let selectMode = false;
   let selectedTrackIds = new Set();
-  let librarySort = { key: 'date', dir: 'desc' };
+  let librarySort = { key: 'title', dir: 'asc' };
   let librarySearchQuery = '';
   let playlistSort = { key: 'default', dir: 'asc' };
   let shuffleActive = false;
@@ -303,11 +303,10 @@
 
   // ===== Sort =====
   const SORT_OPTIONS = [
-    { key:'date',     label:"Date d'ajout" },
-    { key:'year',     label:'Date de sortie' },
     { key:'duration', label:'Durée' },
     { key:'title',    label:'Titre' },
     { key:'artist',   label:'Artiste' },
+    { key:'rating',   label:'Note' },
   ];
   function applySort(tracks, sortState) {
     const st = sortState || librarySort;
@@ -315,19 +314,28 @@
     const s = [...tracks];
     const asc = st.dir === 'asc';
     s.sort((a, b) => {
+      if (st.key === 'rating') {
+        const ra = window.WaveRatings?.getValue(a.id);
+        const rb = window.WaveRatings?.getValue(b.id);
+        if (ra == null) return rb == null ? 0 : 1;
+        if (rb == null) return -1;
+        return asc ? ra - rb : rb - ra;
+      }
       let va, vb;
       switch (st.key) {
         case 'title':    va = transliterate(a.title);  vb = transliterate(b.title);  break;
         case 'artist':   va = transliterate(a.artist); vb = transliterate(b.artist); break;
         case 'duration': va = a.duration || 0;         vb = b.duration || 0;         break;
-        case 'year':     va = a.releaseYear || 0;      vb = b.releaseYear || 0;      break;
-        default:         va = a.importedAt || 0;       vb = b.importedAt || 0;       break;
+        default:         va = transliterate(a.title); vb = transliterate(b.title); break;
       }
       if (typeof va === 'string') return asc ? va.localeCompare(vb) : vb.localeCompare(va);
       return asc ? va - vb : vb - va;
     });
     return s;
   }
+  window.addEventListener('wave:ratings-changed', () => {
+    if (librarySort.key === 'rating' || playlistSort.key === 'rating') refreshLibraryView();
+  });
   function renderSortRow(container, sortState, onSortChange) {
     const st = sortState || librarySort;
     const onChange = onSortChange || (() => refreshLibraryView());
@@ -464,6 +472,9 @@
       optionsList.appendChild(btn);
     };
 
+    addItem('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>',
+      'Ajouter à une playlist', '', () => openPlaylistModal(track.id));
+
     // Retirer de la playlist / Supprimer
     if (ctx.playlistId) {
       addItem('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
@@ -535,7 +546,7 @@
    * SÉCURITÉ : toutes les données utilisateur sont échappées via esc() ou textContent.
    */
   function createTrackElement(track, index, list, opts = {}) {
-    const { playlistId, onRemoveFromPlaylist, showDelete } = opts;
+    const { playlistId, onRemoveFromPlaylist } = opts;
     const wrap = document.createElement('div');
     wrap.className = 'track-item-wrap';
     const div = document.createElement('div');
@@ -547,14 +558,9 @@
 
     const artSrc = sanitizeURL(generateArtwork(track)) || generateArtwork(track);
 
-    // Dans une playlist : pas de bouton "ajouter à playlist" (le menu options gère "retirer")
-    const actionBtn = playlistId ? '' : `<button class="icon-btn playlist-add-btn" title="Ajouter à une playlist">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-      </button>`;
-    // Bouton options (3 points) remplace l'icône poubelle
-    const optionsBtn = (showDelete || playlistId) ? `<button class="icon-btn track-options-btn" title="Options">
+    const optionsBtn = `<button class="icon-btn track-options-btn" title="Options">
       <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
-    </button>` : '';
+    </button>`;
 
     // ⚠️ SÉCURITÉ : esc() appliqué sur toutes les données dynamiques
     div.innerHTML = `
@@ -572,12 +578,13 @@
         <button class="icon-btn fav-btn" title="Favori">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
         </button>
-        ${actionBtn}${optionsBtn}
+        ${optionsBtn}
       </div>`;
 
     DB.isFavorite(track.id).then(isFav => {
       const fb = div.querySelector('.fav-btn');
       if (isFav) { fb.classList.add('fav-active'); fb.querySelector('svg').setAttribute('fill', 'currentColor'); }
+      fb.setAttribute('aria-label', isFav ? 'Retirer des favoris' : 'Ajouter aux favoris');
     });
 
     div.querySelector('.fav-btn').addEventListener('click', async (e) => {
@@ -586,31 +593,28 @@
       const isFav = await DB.toggleFavorite(track.id);
       btn.classList.toggle('fav-active', isFav);
       btn.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
+      btn.setAttribute('aria-label', isFav ? 'Retirer des favoris' : 'Ajouter aux favoris');
       showToast(isFav ? 'Ajouté aux favoris' : 'Retiré des favoris');
       const cur = Player.getCurrentTrack();
       if (cur && cur.id === track.id) {
         playerFavorite.classList.toggle('active', isFav);
         playerFavorite.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
+        playerFavorite.setAttribute('aria-label', isFav ? 'Retirer des favoris' : 'Ajouter aux favoris');
+        nowPlayingFav.classList.toggle('active', isFav);
+        nowPlayingFav.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
       }
     });
 
-    div.querySelector('.playlist-add-btn')?.addEventListener('click', (e) => {
+    div.querySelector('.track-options-btn').addEventListener('click', (e) => {
       e.stopPropagation(); if (selectMode) return;
-      openPlaylistModal(track.id);
-    });
-
-    if (showDelete || playlistId) {
-      div.querySelector('.track-options-btn').addEventListener('click', (e) => {
-        e.stopPropagation(); if (selectMode) return;
-        showTrackOptions(track, {
-          playlistId,
-          onRemove: () => {
-            wrap.style.cssText = 'transition:opacity .2s,transform .2s;opacity:0;transform:translateX(10px)';
-            setTimeout(() => { wrap.remove(); onRemoveFromPlaylist?.(); }, 200);
-          },
-        });
+      showTrackOptions(track, {
+        playlistId,
+        onRemove: () => {
+          wrap.style.cssText = 'transition:opacity .2s,transform .2s;opacity:0;transform:translateX(10px)';
+          setTimeout(() => { wrap.remove(); onRemoveFromPlaylist?.(); }, 200);
+        },
       });
-    }
+    });
 
     let lpTimer = null;
     div.addEventListener('touchstart', () => {
@@ -622,7 +626,7 @@
     div.addEventListener('touchmove', () => clearTimeout(lpTimer));
 
     div.addEventListener('click', (e) => {
-      if (e.target.closest('.fav-btn,.playlist-add-btn,.track-options-btn')) return;
+      if (e.target.closest('.fav-btn,.track-options-btn,.track-rating-badge')) return;
       if (selectMode) { toggleTrackSelect(track.id, div); return; }
       if (ytMode) exitYTMode();
       Player.setQueue(list, index);
@@ -745,7 +749,7 @@
       }
       const c = $('#libraryTracks');
       if (!tracks.length) c.innerHTML = `<p class="empty-state">${librarySearchQuery ? 'Aucun résultat.' : 'Aucun morceau importé.'}</p>`;
-      else renderTrackList(c, tracks, { showDelete: true });
+      else renderTrackList(c, tracks);
     } else if (tab === 'favorites') {
       content.innerHTML = '<div class="track-list" id="libraryTracks"></div>';
       renderSortRow(content);
@@ -761,7 +765,7 @@
       }
       const c = $('#libraryTracks');
       if (!tracks.length) c.innerHTML = `<p class="empty-state">${librarySearchQuery ? 'Aucun résultat.' : 'Aucun favori.'}</p>`;
-      else renderTrackList(c, tracks, { showDelete: true });
+      else renderTrackList(c, tracks);
     } else if (tab === 'playlists') {
       if (currentPlaylistView) await renderPlaylistDetail(currentPlaylistView);
       else await renderPlaylistsGrid();
@@ -1078,6 +1082,12 @@
     nowPlayingFav.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
     playerFavorite.classList.toggle('active', isFav);
     playerFavorite.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
+    playerFavorite.setAttribute('aria-label', isFav ? 'Retirer des favoris' : 'Ajouter aux favoris');
+    $$(`.track-item[data-track-id="${CSS.escape(track.id)}"] .fav-btn`).forEach(btn => {
+      btn.classList.toggle('fav-active', isFav);
+      btn.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
+      btn.setAttribute('aria-label', isFav ? 'Retirer des favoris' : 'Ajouter aux favoris');
+    });
     showToast(isFav ? 'Ajouté aux favoris' : 'Retiré des favoris');
   });
 
@@ -1125,6 +1135,7 @@
     const isFav = await DB.isFavorite(track.id);
     playerFavorite.classList.toggle('active', isFav);
     playerFavorite.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
+    playerFavorite.setAttribute('aria-label', isFav ? 'Retirer des favoris' : 'Ajouter aux favoris');
     nowPlayingFav.classList.toggle('active', isFav);
     nowPlayingFav.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
 
@@ -1206,6 +1217,11 @@
     const svg = mode === 'one' ? base + `<text x="12" y="16" font-size="8" fill="currentColor" text-anchor="middle" font-weight="bold">1</text></svg>` : base + `</svg>`;
     btnRepeat.innerHTML = svg;
     npBtnRepeat.innerHTML = svg;
+    const label = { none:'Répétition désactivée', all:'Répéter tout', one:'Répéter un seul morceau' }[mode];
+    for (const button of [btnRepeat, npBtnRepeat]) {
+      button.setAttribute('aria-label', label);
+      button.title = label;
+    }
   }
   btnRepeat.addEventListener('click', () => {
     repeatMode = Player.toggleRepeat();
@@ -1253,10 +1269,14 @@
     const isFav = await DB.toggleFavorite(track.id);
     playerFavorite.classList.toggle('active', isFav);
     playerFavorite.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
+    playerFavorite.setAttribute('aria-label', isFav ? 'Retirer des favoris' : 'Ajouter aux favoris');
+    nowPlayingFav.classList.toggle('active', isFav);
+    nowPlayingFav.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
     showToast(isFav ? 'Ajouté aux favoris' : 'Retiré des favoris');
-    $$(`.fav-btn[data-track-id="${CSS.escape(track.id)}"]`).forEach(btn => {
+    $$(`.track-item[data-track-id="${CSS.escape(track.id)}"] .fav-btn`).forEach(btn => {
       btn.classList.toggle('fav-active', isFav);
       btn.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
+      btn.setAttribute('aria-label', isFav ? 'Retirer des favoris' : 'Ajouter aux favoris');
     });
   });
 

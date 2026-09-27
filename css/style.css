@@ -173,8 +173,8 @@ input  { border:none; background:none; color:inherit; font:inherit; outline:none
 .track-duration { font-variant-numeric:tabular-nums; color:var(--text-muted); font-size:0.7rem; min-width:32px; text-align:right; }
 .track-actions .icon-btn { width:30px; height:30px; }
 .track-actions .icon-btn svg { width:14px; height:14px; }
-.icon-btn.fav-active { color:var(--accent); }
-.icon-btn.fav-active svg { fill:var(--accent); }
+.icon-btn.fav-active { color:#ff4b62; }
+.icon-btn.fav-active svg { fill:currentColor; }
 
 .delete-track-btn { opacity:0; transition:opacity var(--transition), color var(--transition) !important; }
 .track-item:hover .delete-track-btn { opacity:1; }
@@ -189,6 +189,7 @@ input  { border:none; background:none; color:inherit; font:inherit; outline:none
 .icon-btn svg { width:16px; height:16px; }
 .icon-btn:hover { color:var(--text-primary); background:rgba(255,255,255,.06); }
 .icon-btn.active { color:var(--accent); }
+.favorite-btn.active { color:#ff4b62; }
 
 .spinner { width:16px; height:16px; border:1.5px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin .7s linear infinite; }
 
@@ -577,7 +578,7 @@ input  { border:none; background:none; color:inherit; font:inherit; outline:none
 }
 .now-playing-fav { flex-shrink:0; width:40px; height:40px; }
 .now-playing-fav svg { width:20px; height:20px; }
-.now-playing-fav.active { color:var(--accent); }
+.now-playing-fav.active { color:#ff4b62; }
 .now-playing-fav.active svg { fill:currentColor; }
 .now-playing-progress-wrap { width:100%; margin-bottom:20px; flex-shrink:0; }
 .np-progress-bar {
@@ -770,10 +771,13 @@ input  { border:none; background:none; color:inherit; font:inherit; outline:none
 @media (max-width:600px) {
   .player-main-row { gap:8px; }
   .player-track-info { gap:6px; }
-  .player-track-info #playerFavorite { display:none; }
-  .player-controls #btnShuffle, .player-controls #btnRepeat,
+  .player-track-info #playerFavorite { flex-shrink:0; width:44px; height:44px; }
+  .player-controls #btnShuffle,
   .player-controls #btnSkipBack, .player-controls #btnSkipFwd { display:none; }
   .player-controls .icon-btn:not(.play-btn) { width:44px; height:44px; }
+}
+@media (max-width:360px) {
+  .player-track-info .player-artwork { display:none; }
 }
 
 @media (orientation:landscape) and (hover:none) and (max-height:500px) {

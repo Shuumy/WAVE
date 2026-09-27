@@ -9,12 +9,11 @@
 
   const format = value => Number(value).toLocaleString('fr-FR', { maximumFractionDigits: 1 });
   const getTracks = () => DB.getUserTracks();
-  const currentTrack = () => {
-    try { return Player.getCurrentTrack(); } catch { return null; }
-  };
+  window.WaveRatings = { getValue: id => ratings.get(id) };
 
   async function loadRatings() {
     ratings = new Map((await DB.getRatings()).map(item => [item.id, item.value]));
+    window.dispatchEvent(new Event('wave:ratings-changed'));
   }
 
   function createModal() {
@@ -103,6 +102,7 @@
     const value = await DB.setRating(id, draftRating);
     ratings.set(id, value);
     closeModal();
+    window.dispatchEvent(new Event('wave:ratings-changed'));
     scheduleRefresh();
   }
 
@@ -112,6 +112,7 @@
     await DB.removeRating(id);
     ratings.delete(id);
     closeModal();
+    window.dispatchEvent(new Event('wave:ratings-changed'));
     scheduleRefresh();
   }
 
@@ -138,31 +139,6 @@
     });
   }
 
-  function ensurePlayerRating() {
-    const host = document.querySelector('.player-track-info');
-    if (!host) return;
-    let button = document.getElementById('playerRating');
-    if (!button) {
-      button = document.createElement('button');
-      button.id = 'playerRating';
-      button.type = 'button';
-      button.className = 'player-rating';
-      button.addEventListener('click', event => {
-        event.stopPropagation();
-        const track = currentTrack();
-        if (track?.id) openModal(track.id);
-      });
-      host.appendChild(button);
-    }
-    const track = currentTrack();
-    const value = track?.id ? ratings.get(track.id) : undefined;
-    if (button.disabled !== !track?.id) button.disabled = !track?.id;
-    const text = value === undefined ? '☆ Noter' : `★ ${format(value)}`;
-    const label = value === undefined ? 'Noter le morceau en cours' : `Note ${format(value)} sur 5. Modifier.`;
-    if (button.textContent !== text) button.textContent = text;
-    if (button.getAttribute('aria-label') !== label) button.setAttribute('aria-label', label);
-  }
-
   function injectOptionsItem() {
     const list = document.getElementById('optionsList');
     if (!list || !selectedTrackId || list.querySelector('.rating-option')) return;
@@ -178,107 +154,13 @@
     list.insertBefore(item, list.firstChild);
   }
 
-  function ensureRatingSort() {
-    document.querySelectorAll('.sort-row').forEach(row => {
-      if (row.querySelector('[data-rating-sort]')) return;
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'sort-btn';
-      button.dataset.ratingSort = 'desc';
-      button.textContent = 'Note ↓';
-      button.addEventListener('click', () => {
-        const desc = button.dataset.ratingSort === 'desc';
-        button.dataset.ratingSort = desc ? 'asc' : 'desc';
-        button.textContent = desc ? 'Note ↑' : 'Note ↓';
-        const list = row.parentElement?.querySelector('.track-list');
-        if (!list) return;
-        [...list.querySelectorAll('.track-item-wrap')]
-          .sort((a, b) => {
-            const av = ratings.get(a.querySelector('.track-item')?.dataset.trackId) ?? -1;
-            const bv = ratings.get(b.querySelector('.track-item')?.dataset.trackId) ?? -1;
-            return desc ? av - bv : bv - av;
-          })
-          .forEach(item => list.appendChild(item));
-      });
-      row.appendChild(button);
-    });
-  }
-
-  async function renderRatedTab() {
-    const active = document.querySelector('.library-tabs .tab-btn.active');
-    if (active?.dataset.tab !== 'rated') return;
-    const content = document.getElementById('libraryContent');
-    if (!content) return;
-    const tracks = (await getTracks())
-      .filter(track => ratings.has(track.id))
-      .sort((a, b) => ratings.get(b.id) - ratings.get(a.id));
-    const signature = JSON.stringify(tracks.map(track => [track.id, track.title, track.artist, ratings.get(track.id)]));
-    if (content.dataset.ratedSignature === signature && content.querySelector('.rated-list')) return;
-    content.dataset.ratedSignature = signature;
-    content.innerHTML = '<div class="rated-header"><strong>Morceaux notés</strong><button type="button" id="ratedDirection">Meilleures notes d’abord</button></div><div class="rated-list"></div>';
-    const list = content.querySelector('.rated-list');
-    const draw = ordered => {
-      list.innerHTML = '';
-      if (!ordered.length) {
-        list.innerHTML = '<p class="empty-state">Aucun morceau noté.</p>';
-        return;
-      }
-      ordered.forEach((track, index) => {
-        const item = document.createElement('button');
-        item.type = 'button';
-        item.className = 'rated-item';
-        const image = document.createElement('img');
-        image.src = track.coverArt || './assets/icons/icon-192-v2.png';
-        image.alt = '';
-        const text = document.createElement('span');
-        text.className = 'rated-copy';
-        const title = document.createElement('strong');
-        title.textContent = track.title || 'Sans titre';
-        const artist = document.createElement('small');
-        artist.textContent = track.artist || 'Artiste inconnu';
-        text.append(title, artist);
-        const score = document.createElement('span');
-        score.className = 'rated-score';
-        score.textContent = `★ ${format(ratings.get(track.id))}`;
-        item.append(image, text, score);
-        item.addEventListener('click', () => {
-          Player.setQueue(ordered, index);
-          Player.play(track);
-        });
-        item.addEventListener('contextmenu', event => {
-          event.preventDefault();
-          openModal(track.id);
-        });
-        list.appendChild(item);
-      });
-    };
-    draw(tracks);
-    let descending = true;
-    content.querySelector('#ratedDirection').addEventListener('click', event => {
-      descending = !descending;
-      event.currentTarget.textContent = descending ? 'Meilleures notes d’abord' : 'Notes les plus basses d’abord';
-      draw([...tracks].sort((a, b) => (ratings.get(b.id) - ratings.get(a.id)) * (descending ? 1 : -1)));
-    });
-  }
-
-  function bindRatedTab() {
-    const tab = document.querySelector('.library-tabs [data-tab="rated"]');
-    if (!tab || tab.dataset.ratingsBound) return;
-    tab.dataset.ratingsBound = 'true';
-    tab.addEventListener('click', () => setTimeout(renderRatedTab, 0));
-  }
-
   function scheduleRefresh() {
     if (refreshPending) return;
     refreshPending = true;
     setTimeout(() => {
       refreshPending = false;
       decorateTracks();
-      ensurePlayerRating();
       injectOptionsItem();
-      ensureRatingSort();
-      bindRatedTab();
-      renderRatedTab();
     }, 40);
   }
 
@@ -290,8 +172,8 @@
   new MutationObserver(records => {
     const relevant = records.some(record => {
       const target = record.target instanceof Element ? record.target : record.target.parentElement;
-      if (!target || target.closest('.rating-modal,.rated-list,.track-rating-badge,.player-rating')) return false;
-      return Boolean(target.closest('.track-list,.library-tabs,.sort-row,#libraryContent,#optionsList,.player-track-info'));
+      if (!target || target.closest('.rating-modal,.track-rating-badge')) return false;
+      return Boolean(target.closest('.track-list,#libraryContent,#optionsList'));
     });
     if (relevant) scheduleRefresh();
   }).observe(document.documentElement, {
@@ -300,7 +182,6 @@
     attributes: true,
     attributeFilter: ['class', 'hidden'],
   });
-  setInterval(ensurePlayerRating, 750);
 
   async function init() {
     try {
