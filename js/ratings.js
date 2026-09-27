@@ -141,7 +141,7 @@
 
   function injectOptionsItem() {
     const list = document.getElementById('optionsList');
-    if (!list || !selectedTrackId || list.querySelector('.rating-option')) return;
+    if (!list || !selectedTrackId || document.getElementById('optionsOverlay')?.dataset.context !== 'track' || list.querySelector('.rating-option')) return;
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'options-item rating-option';

@@ -78,6 +78,12 @@ const DB = (() => {
     await put('audio', { id: meta.id, blob });
   }
 
+  async function updateUserTrack(id, changes) {
+    const track = await get('tracks', id);
+    if (!track?.userImported) throw new Error('Morceau introuvable.');
+    await put('tracks', { ...track, ...changes, id });
+  }
+
   async function removeUserTrack(id) {
     await del('tracks', id);
     await del('audio', id);
@@ -216,6 +222,7 @@ const DB = (() => {
     open,
     getUserTracks,
     saveUserTrack,
+    updateUserTrack,
     removeUserTrack,
     getUserAudioBlob,
     getSetting,
