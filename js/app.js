@@ -117,6 +117,7 @@
   let librarySearchQuery = '';
   let playlistSort = { key: 'default', dir: 'asc' };
   let cleanupPlaylistCoverAction = null;
+  let cleanupPlaylistScroll = null;
   let libraryCustomOrder = (await DB.getSetting('libraryCustomOrder')) || [];
   if (!Array.isArray(libraryCustomOrder)) libraryCustomOrder = [];
   let shuffleActive = false;
@@ -175,6 +176,7 @@
       $(`#view${btn.dataset.view.charAt(0).toUpperCase() + btn.dataset.view.slice(1)}`).classList.add('active');
       currentPlaylistView = null;
       cleanupPlaylistCoverAction?.();
+      cleanupPlaylistScroll?.();
       $('.main-content')?.classList.remove('playlist-open');
       setTheme(document.documentElement.dataset.theme || 'dark');
       if (btn.dataset.view === 'library') refreshLibraryView();
@@ -529,47 +531,70 @@
           if (selected.has(id)) selected.delete(id); else selected.add(id);
           render();
         });
-        // Capture du pointeur : la rangée suit le doigt pendant le glissement.
-        // Les autres rangées coulissent dès que son centre passe leur milieu.
+        // La ligne d'origine sert de repère dans le flux. Seule une copie
+        // visuelle suit le doigt : Safari ne recompose jamais la ligne capturée.
         const handle = row.querySelector('.organizer-handle');
         let drag = null;
-        const move = () => {
+        const paintDrag = () => {
           if (!drag) return;
           const bounds = list.getBoundingClientRect();
-          if (drag.y > bounds.bottom - 54) list.scrollTop += 13;
-          if (drag.y < bounds.top + 54) list.scrollTop -= 13;
-          const siblings = [...list.children].filter(item => item !== row);
-          const before = siblings.find(item => drag.y < bounds.top + item.offsetTop - list.scrollTop + item.offsetHeight / 2) || null;
-          if (row.nextElementSibling !== before) {
-            const previous = new Map(siblings.map(item => [item, item.getBoundingClientRect().top]));
-            list.insertBefore(row, before);
-            siblings.forEach(item => {
-              const delta = previous.get(item) - item.getBoundingClientRect().top;
-              if (Math.abs(delta) > 1) item.animate([{ transform:`translateY(${delta}px)` }, { transform:'translateY(0)' }], { duration:170, easing:'ease-out' });
-            });
+          drag.ghost.style.transform = `translate3d(0, ${drag.y - drag.startY}px, 0)`;
+          const edge = drag.y > bounds.bottom - 52 ? 1 : drag.y < bounds.top + 52 ? -1 : 0;
+          if (edge) list.scrollTop += edge * 12;
+          const middle = drag.y - drag.grip + row.offsetHeight / 2;
+          // Décaler un seul voisin à la fois, avec une petite zone morte pour
+          // éviter l'oscillation lorsque le doigt reste entre deux morceaux.
+          const next = row.nextElementSibling, prev = row.previousElementSibling;
+          const neighbor = next && middle > bounds.top + next.offsetTop - list.scrollTop + next.offsetHeight / 2 + 8 ? next :
+            prev && middle < bounds.top + prev.offsetTop - list.scrollTop + prev.offsetHeight / 2 - 8 ? prev : null;
+          if (neighbor) {
+            neighbor.getAnimations().forEach(animation => animation.cancel());
+            const before = neighbor.getBoundingClientRect().top;
+            if (neighbor === next) list.insertBefore(row, next.nextElementSibling);
+            else list.insertBefore(row, prev);
+            const delta = before - neighbor.getBoundingClientRect().top;
+            neighbor.animate([{ transform:`translate3d(0, ${delta}px, 0)` }, { transform:'translate3d(0, 0, 0)' }],
+              { duration:165, easing:'cubic-bezier(.2,.8,.2,1)' });
           }
-          row.style.transform = 'none';
-          row.style.transform = `translate3d(0, ${drag.y - drag.offset - row.getBoundingClientRect().top}px, 0)`;
-          drag.frame = requestAnimationFrame(move);
+          if (edge && drag) schedulePaint();
+        };
+        const schedulePaint = () => {
+          if (!drag || drag.frame) return;
+          drag.frame = requestAnimationFrame(() => { if (!drag) return; drag.frame = 0; paintDrag(); });
         };
         handle.addEventListener('pointerdown', e => {
           if (e.button !== 0) return;
           e.preventDefault();
-          drag = { y:e.clientY, offset:e.clientY - row.getBoundingClientRect().top, frame:0 };
-          handle.setPointerCapture(e.pointerId); row.classList.add('dragging');
-          drag.frame = requestAnimationFrame(move);
+          const rect = row.getBoundingClientRect();
+          const ghost = row.cloneNode(true);
+          ghost.classList.add('organizer-ghost');
+          ghost.setAttribute('aria-hidden', 'true');
+          ghost.querySelectorAll('button').forEach(button => { button.tabIndex = -1; });
+          Object.assign(ghost.style, { left:`${rect.left}px`, top:`${rect.top}px`, width:`${rect.width}px`, height:`${rect.height}px` });
+          overlay.appendChild(ghost);
+          drag = { y:e.clientY, startY:e.clientY, grip:e.clientY - rect.top, frame:0, ghost,
+            original:[...list.children] };
+          row.classList.add('drag-placeholder');
+          handle.setPointerCapture(e.pointerId);
         });
         handle.addEventListener('pointermove', e => {
-          if (drag && handle.hasPointerCapture(e.pointerId)) drag.y = e.clientY;
+          if (drag && handle.hasPointerCapture(e.pointerId)) { drag.y = e.clientY; schedulePaint(); }
         });
-        const finishDrag = () => {
+        const finishDrag = (cancelled = false) => {
           if (!drag) return;
-          cancelAnimationFrame(drag.frame); drag = null;
-          ids.splice(0, ids.length, ...[...list.children].map(item => item.dataset.trackId));
-          row.style.transform = ''; row.classList.remove('dragging');
+          cancelAnimationFrame(drag.frame);
+          const { ghost, original } = drag;
+          drag = null;
+          if (cancelled) original.forEach(item => list.appendChild(item));
+          else ids.splice(0, ids.length, ...[...list.children].map(item => item.dataset.trackId));
+          const destination = row.getBoundingClientRect();
+          ghost.style.transition = 'transform 130ms cubic-bezier(.2,.8,.2,1), opacity 130ms ease-out';
+          ghost.style.transform = `translate3d(0, ${destination.top - parseFloat(ghost.style.top)}px, 0)`;
+          ghost.style.opacity = '0';
+          setTimeout(() => { ghost.remove(); row.classList.remove('drag-placeholder'); }, 140);
         };
-        handle.addEventListener('pointercancel', finishDrag);
-        handle.addEventListener('pointerup', finishDrag);
+        handle.addEventListener('pointercancel', () => finishDrag(true));
+        handle.addEventListener('pointerup', () => finishDrag());
         handle.addEventListener('click', e => e.stopPropagation());
         handle.addEventListener('keydown', e => {
           if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
@@ -1094,7 +1119,7 @@
     const tab = $('.library-tabs .tab-btn.active')?.dataset.tab;
     const content = $('#libraryContent');
     $('.main-content')?.classList.toggle('playlist-open', tab === 'playlists' && !!currentPlaylistView);
-    if (tab !== 'playlists' || !currentPlaylistView) cleanupPlaylistCoverAction?.();
+    if (tab !== 'playlists' || !currentPlaylistView) { cleanupPlaylistCoverAction?.(); cleanupPlaylistScroll?.(); }
     if (tab !== 'playlists' || !currentPlaylistView) setTheme(document.documentElement.dataset.theme || 'dark');
     // Masquer la searchbar pour les playlists
     if (libSearchBar) libSearchBar.hidden = (tab === 'playlists');
@@ -1198,9 +1223,14 @@
     };
     applyPalette(palette);
     cleanupPlaylistCoverAction?.();
+    cleanupPlaylistScroll?.();
 
     // ⚠️ SÉCURITÉ : esc() sur pl.name, esc() sur coverSrc
     content.innerHTML = `
+      <div class="playlist-compact-header" id="playlistCompactHeader" aria-hidden="true">
+        <button type="button" id="playlistCompactBack" aria-label="Retour aux playlists"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg></button>
+        <span id="playlistCompactName"></span>
+      </div>
       <div class="playlist-hero">
       <button class="playlist-back-btn" id="playlistBack">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg> Retour
@@ -1231,6 +1261,7 @@
 
     // Injection sécurisée du nom via textContent
     $('#playlistNameSpan').textContent = pl.name;
+    $('#playlistCompactName').textContent = pl.name;
 
     const plTracksContainer = $('#playlistTracks');
     if (!tracks.length) {
@@ -1241,6 +1272,7 @@
     }
     renderSortRow($('#playlistSortZone'), playlistSort, () => renderPlaylistDetail(plId), pl, tracks);
     const hero = content.querySelector('.playlist-hero');
+    const compact = $('#playlistCompactHeader');
     const coverButton = $('#playlistCoverBtn');
     const hideCoverAction = () => coverButton.classList.remove('cover-actions-visible');
     const dismissOutside = e => {
@@ -1256,15 +1288,29 @@
       scroller.removeEventListener('wheel', hideCoverAction);
       hideCoverAction(); cleanupPlaylistCoverAction = null;
     };
-    const fade = () => {
-      if (!hero.isConnected) { scroller?.removeEventListener('scroll', fade); return; }
+    let scrollFrame = 0;
+    const paintScroll = () => {
+      scrollFrame = 0;
+      if (!hero.isConnected) return;
       const distance = Math.max(0, scroller.scrollTop);
-      hero.style.setProperty('--hero-opacity', Math.max(.2, 1 - distance / 570));
-      hero.style.setProperty('--cover-shift', `${Math.min(245, distance * .73)}px`);
-      hero.style.setProperty('--cover-alpha', Math.max(0, Math.min(1, (340 - distance) / 260)));
+      hero.style.setProperty('--hero-opacity', Math.max(.18, 1 - distance / 380));
+      hero.style.setProperty('--cover-shift', `${Math.min(125, distance * .48)}px`);
+      hero.style.setProperty('--cover-alpha', Math.max(0, Math.min(1, (205 - distance) / 160)));
+      compact.style.opacity = Math.max(0, Math.min(1, (distance - 240) / 80));
+      compact.style.pointerEvents = distance > 290 ? 'auto' : 'none';
+      compact.setAttribute('aria-hidden', distance <= 290 ? 'true' : 'false');
+      compact.querySelector('button').tabIndex = distance > 290 ? 0 : -1;
       if (distance > 0) hideCoverAction();
     };
-    scroller?.addEventListener('scroll', fade, { passive:true }); fade();
+    const onScroll = () => {
+      if (!hero.isConnected) { cleanupPlaylistScroll?.(); return; }
+      if (!scrollFrame) scrollFrame = requestAnimationFrame(paintScroll);
+    };
+    scroller.addEventListener('scroll', onScroll, { passive:true }); paintScroll();
+    cleanupPlaylistScroll = () => {
+      scroller.removeEventListener('scroll', onScroll);
+      cancelAnimationFrame(scrollFrame); cleanupPlaylistScroll = null;
+    };
     if (coverSrc) {
       const cover = hero.querySelector('.playlist-detail-cover img');
       const sample = () => {
@@ -1273,7 +1319,9 @@
       };
       if (cover.complete && cover.naturalWidth) sample(); else cover.addEventListener('load', sample, { once:true });
     }
-    $('#playlistBack').addEventListener('click', () => { currentPlaylistView = null; refreshLibraryView(); });
+    const backToPlaylists = () => { currentPlaylistView = null; refreshLibraryView(); };
+    $('#playlistBack').addEventListener('click', backToPlaylists);
+    $('#playlistCompactBack').addEventListener('click', backToPlaylists);
     $('#playlistMenuBtn').addEventListener('click', () => showPlaylistOptions(pl));
     coverButton.addEventListener('click', () => {
       // Sur écran tactile, premier appui révèle l'action ; deuxième appui ouvre Fichiers.
