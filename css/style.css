@@ -397,7 +397,7 @@ html.ios-standalone, html.ios-standalone body, html.ios-standalone #app { height
 .organizer-head button { font-size:.8rem; }
 .organizer-save { color:var(--accent); font-weight:700; }
 .organizer-hint { color:var(--text-muted); font-size:.76rem; padding:0 16px 12px; }
-.organizer-list { position:relative; overflow-y:auto; flex:1; overscroll-behavior:contain; }
+.organizer-list { position:relative; overflow-y:auto; flex:1; overscroll-behavior:contain; overflow-anchor:none; }
 .organizer-track { display:flex; align-items:center; gap:12px; padding:8px 16px; min-height:70px; }
 .organizer-track.drag-placeholder { opacity:.13; }
 .organizer-ghost {

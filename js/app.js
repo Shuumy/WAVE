@@ -511,12 +511,17 @@
       <button type="button" class="organizer-remove" disabled>${playlist || favoritesView ? 'Retirer' : 'Supprimer'} (0)</button></div></div>`;
     const list = overlay.querySelector('.organizer-list');
     const remove = overlay.querySelector('.organizer-remove');
+    const dragController = WaveOrganizerDrag.attach(list, overlay, order => {
+      ids.splice(0, ids.length, ...order);
+    });
+    const closeOrganizer = () => { dragController.destroy(); overlay.remove(); };
     const updateSelected = () => {
       remove.disabled = !selected.size;
       remove.textContent = `${playlist || favoritesView ? 'Retirer' : 'Supprimer'} (${selected.size})`;
       overlay.querySelector('.organizer-all').textContent = selected.size === ids.length && ids.length ? 'Tout désélectionner' : 'Tout sélectionner';
     };
     const render = () => {
+      dragController.cancel();
       list.innerHTML = '';
       ids.forEach((id, index) => {
         const track = findTrack(id); if (!track) return;
@@ -531,70 +536,7 @@
           if (selected.has(id)) selected.delete(id); else selected.add(id);
           render();
         });
-        // La ligne d'origine sert de repère dans le flux. Seule une copie
-        // visuelle suit le doigt : Safari ne recompose jamais la ligne capturée.
         const handle = row.querySelector('.organizer-handle');
-        let drag = null;
-        const paintDrag = () => {
-          if (!drag) return;
-          const bounds = list.getBoundingClientRect();
-          drag.ghost.style.transform = `translate3d(0, ${drag.y - drag.startY}px, 0)`;
-          const edge = drag.y > bounds.bottom - 52 ? 1 : drag.y < bounds.top + 52 ? -1 : 0;
-          if (edge) list.scrollTop += edge * 12;
-          const middle = drag.y - drag.grip + row.offsetHeight / 2;
-          // Décaler un seul voisin à la fois, avec une petite zone morte pour
-          // éviter l'oscillation lorsque le doigt reste entre deux morceaux.
-          const next = row.nextElementSibling, prev = row.previousElementSibling;
-          const neighbor = next && middle > bounds.top + next.offsetTop - list.scrollTop + next.offsetHeight / 2 + 8 ? next :
-            prev && middle < bounds.top + prev.offsetTop - list.scrollTop + prev.offsetHeight / 2 - 8 ? prev : null;
-          if (neighbor) {
-            neighbor.getAnimations().forEach(animation => animation.cancel());
-            const before = neighbor.getBoundingClientRect().top;
-            if (neighbor === next) list.insertBefore(row, next.nextElementSibling);
-            else list.insertBefore(row, prev);
-            const delta = before - neighbor.getBoundingClientRect().top;
-            neighbor.animate([{ transform:`translate3d(0, ${delta}px, 0)` }, { transform:'translate3d(0, 0, 0)' }],
-              { duration:165, easing:'cubic-bezier(.2,.8,.2,1)' });
-          }
-          if (edge && drag) schedulePaint();
-        };
-        const schedulePaint = () => {
-          if (!drag || drag.frame) return;
-          drag.frame = requestAnimationFrame(() => { if (!drag) return; drag.frame = 0; paintDrag(); });
-        };
-        handle.addEventListener('pointerdown', e => {
-          if (e.button !== 0) return;
-          e.preventDefault();
-          const rect = row.getBoundingClientRect();
-          const ghost = row.cloneNode(true);
-          ghost.classList.add('organizer-ghost');
-          ghost.setAttribute('aria-hidden', 'true');
-          ghost.querySelectorAll('button').forEach(button => { button.tabIndex = -1; });
-          Object.assign(ghost.style, { left:`${rect.left}px`, top:`${rect.top}px`, width:`${rect.width}px`, height:`${rect.height}px` });
-          overlay.appendChild(ghost);
-          drag = { y:e.clientY, startY:e.clientY, grip:e.clientY - rect.top, frame:0, ghost,
-            original:[...list.children] };
-          row.classList.add('drag-placeholder');
-          handle.setPointerCapture(e.pointerId);
-        });
-        handle.addEventListener('pointermove', e => {
-          if (drag && handle.hasPointerCapture(e.pointerId)) { drag.y = e.clientY; schedulePaint(); }
-        });
-        const finishDrag = (cancelled = false) => {
-          if (!drag) return;
-          cancelAnimationFrame(drag.frame);
-          const { ghost, original } = drag;
-          drag = null;
-          if (cancelled) original.forEach(item => list.appendChild(item));
-          else ids.splice(0, ids.length, ...[...list.children].map(item => item.dataset.trackId));
-          const destination = row.getBoundingClientRect();
-          ghost.style.transition = 'transform 130ms cubic-bezier(.2,.8,.2,1), opacity 130ms ease-out';
-          ghost.style.transform = `translate3d(0, ${destination.top - parseFloat(ghost.style.top)}px, 0)`;
-          ghost.style.opacity = '0';
-          setTimeout(() => { ghost.remove(); row.classList.remove('drag-placeholder'); }, 140);
-        };
-        handle.addEventListener('pointercancel', () => finishDrag(true));
-        handle.addEventListener('pointerup', () => finishDrag());
         handle.addEventListener('click', e => e.stopPropagation());
         handle.addEventListener('keydown', e => {
           if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
@@ -607,7 +549,7 @@
       });
       updateSelected();
     };
-    overlay.querySelector('.organizer-cancel').addEventListener('click', () => overlay.remove());
+    overlay.querySelector('.organizer-cancel').addEventListener('click', () => closeOrganizer());
     overlay.querySelector('.organizer-all').addEventListener('click', () => {
       if (selected.size === ids.length) selected.clear(); else ids.forEach(id => selected.add(id)); render();
     });
@@ -619,9 +561,10 @@
       selected.clear(); render();
     });
     overlay.querySelector('.organizer-save').addEventListener('click', async () => {
+      dragController.cancel();
       if (playlist) {
         const latest = await DB.getPlaylist(playlist.id);
-        if (!latest) { overlay.remove(); return; }
+        if (!latest) { closeOrganizer(); return; }
         latest.trackIds = [...ids, ...latest.trackIds.filter(id => !allIds.includes(id))];
         await DB.updatePlaylist(latest); playlistSort.key = 'custom';
       } else {
@@ -635,11 +578,11 @@
         await DB.setSetting('libraryCustomOrder', libraryCustomOrder);
         librarySort.key = 'custom';
       }
-      overlay.remove(); refreshAllViews();
+      closeOrganizer(); refreshAllViews();
       showToast('Ordre enregistré');
     });
-    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-    overlay.addEventListener('keydown', e => { if (e.key === 'Escape') overlay.remove(); });
+    overlay.addEventListener('click', e => { if (e.target === overlay) closeOrganizer(); });
+    overlay.addEventListener('keydown', e => { if (e.key === 'Escape') closeOrganizer(); });
     document.body.appendChild(overlay); render();
     overlay.querySelector('.organizer-cancel').focus();
   }
