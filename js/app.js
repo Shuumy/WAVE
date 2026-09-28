@@ -116,6 +116,7 @@
   let librarySort = { key: 'title', dir: 'asc' };
   let librarySearchQuery = '';
   let playlistSort = { key: 'default', dir: 'asc' };
+  let cleanupPlaylistCoverAction = null;
   let libraryCustomOrder = (await DB.getSetting('libraryCustomOrder')) || [];
   if (!Array.isArray(libraryCustomOrder)) libraryCustomOrder = [];
   let shuffleActive = false;
@@ -173,7 +174,9 @@
       views.forEach(v => v.classList.remove('active'));
       $(`#view${btn.dataset.view.charAt(0).toUpperCase() + btn.dataset.view.slice(1)}`).classList.add('active');
       currentPlaylistView = null;
+      cleanupPlaylistCoverAction?.();
       $('.main-content')?.classList.remove('playlist-open');
+      setTheme(document.documentElement.dataset.theme || 'dark');
       if (btn.dataset.view === 'library') refreshLibraryView();
       if (btn.dataset.view === 'home')    refreshHomeView();
       if (btn.dataset.view === 'import')  refreshImportView();
@@ -205,7 +208,9 @@
   const settingsPanelContent = $('#settingsPanelContent');
   function setTheme(theme) {
     document.documentElement.dataset.theme = theme;
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'light' ? '#fafafa' : '#0a0a0a');
+    if (!$('.main-content')?.classList.contains('playlist-open')) {
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'light' ? '#fafafa' : '#0a0a0a');
+    }
     $$('.settings-theme-choice').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.theme === theme)));
   }
   DB.getSetting('theme').then(theme => setTheme(theme === 'light' ? 'light' : 'dark'));
@@ -451,12 +456,12 @@
     row.className = 'sort-row';
     const edit = document.createElement('button');
     edit.className = 'sort-pill'; edit.type = 'button';
-    edit.innerHTML = '<span aria-hidden="true">☷</span> Modifier';
+    edit.innerHTML = '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M9 6h12M9 12h12M9 18h12M3 6h2M3 12h2M3 18h2"/></svg><span>Modifier</span>';
     edit.addEventListener('click', () => openTrackOrganizer(playlist, visibleTracks));
     row.appendChild(edit);
     const sort = document.createElement('button');
     sort.className = 'sort-pill'; sort.type = 'button';
-    sort.innerHTML = '<span aria-hidden="true">↕</span> Trier';
+    sort.innerHTML = '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M7 12h10M10 17h4"/><path d="m17 4 3 3-3 3"/></svg><span>Trier</span>';
     sort.setAttribute('aria-label', 'Trier les morceaux');
     sort.addEventListener('click', () => {
       const overlay = document.createElement('div');
@@ -514,38 +519,61 @@
       ids.forEach((id, index) => {
         const track = findTrack(id); if (!track) return;
         const row = document.createElement('div'); row.className = 'organizer-track';
+        row.dataset.trackId = id;
         const cover = sanitizeURL(generateArtwork(track)) || generateArtwork(track);
         row.innerHTML = `<button type="button" class="organizer-check" aria-label="Sélectionner ${esc(track.title)}" aria-pressed="${selected.has(id)}">${selected.has(id) ? '✓' : '○'}</button>
           <img src="${esc(cover)}" alt=""><div class="organizer-meta"><strong>${esc(track.title)}</strong><small>${esc(track.artist)}</small></div>
-          <button type="button" class="organizer-handle" aria-label="Déplacer ${esc(track.title)}">☰</button>`;
-        row.querySelector('.organizer-check').addEventListener('click', () => {
+          <button type="button" class="organizer-handle" aria-label="Déplacer ${esc(track.title)}. Flèches haut et bas au clavier"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>`;
+        row.addEventListener('click', e => {
+          if (e.target.closest('.organizer-handle')) return;
           if (selected.has(id)) selected.delete(id); else selected.add(id);
           render();
         });
-        // Pointer Events fonctionne au toucher sur iPhone et à la souris.
+        // Capture du pointeur : la rangée suit le doigt pendant le glissement.
+        // Les autres rangées coulissent dès que son centre passe leur milieu.
         const handle = row.querySelector('.organizer-handle');
+        let drag = null;
+        const move = () => {
+          if (!drag) return;
+          const bounds = list.getBoundingClientRect();
+          if (drag.y > bounds.bottom - 54) list.scrollTop += 13;
+          if (drag.y < bounds.top + 54) list.scrollTop -= 13;
+          const siblings = [...list.children].filter(item => item !== row);
+          const before = siblings.find(item => drag.y < bounds.top + item.offsetTop - list.scrollTop + item.offsetHeight / 2) || null;
+          if (row.nextElementSibling !== before) {
+            const previous = new Map(siblings.map(item => [item, item.getBoundingClientRect().top]));
+            list.insertBefore(row, before);
+            siblings.forEach(item => {
+              const delta = previous.get(item) - item.getBoundingClientRect().top;
+              if (Math.abs(delta) > 1) item.animate([{ transform:`translateY(${delta}px)` }, { transform:'translateY(0)' }], { duration:170, easing:'ease-out' });
+            });
+          }
+          row.style.transform = 'none';
+          row.style.transform = `translate3d(0, ${drag.y - drag.offset - row.getBoundingClientRect().top}px, 0)`;
+          drag.frame = requestAnimationFrame(move);
+        };
         handle.addEventListener('pointerdown', e => {
-          e.preventDefault(); handle.setPointerCapture(e.pointerId); row.classList.add('dragging');
+          if (e.button !== 0) return;
+          e.preventDefault();
+          drag = { y:e.clientY, offset:e.clientY - row.getBoundingClientRect().top, frame:0 };
+          handle.setPointerCapture(e.pointerId); row.classList.add('dragging');
+          drag.frame = requestAnimationFrame(move);
         });
         handle.addEventListener('pointermove', e => {
-          if (!handle.hasPointerCapture(e.pointerId)) return;
-          const bounds = list.getBoundingClientRect();
-          if (e.clientY > bounds.bottom - 48) list.scrollTop += 18;
-          else if (e.clientY < bounds.top + 48) list.scrollTop -= 18;
+          if (drag && handle.hasPointerCapture(e.pointerId)) drag.y = e.clientY;
         });
-        handle.addEventListener('pointercancel', () => row.classList.remove('dragging'));
-        handle.addEventListener('pointerup', e => {
-          if (!handle.hasPointerCapture(e.pointerId)) return;
-          handle.releasePointerCapture(e.pointerId); row.classList.remove('dragging');
-          const target = document.elementFromPoint(e.clientX, e.clientY)?.closest('.organizer-track');
-          if (!target || !list.contains(target)) return;
-          const destination = [...list.children].indexOf(target);
-          if (destination < 0 || destination === index) return;
-          ids.splice(index, 1); ids.splice(destination, 0, id); render();
-        });
+        const finishDrag = () => {
+          if (!drag) return;
+          cancelAnimationFrame(drag.frame); drag = null;
+          ids.splice(0, ids.length, ...[...list.children].map(item => item.dataset.trackId));
+          row.style.transform = ''; row.classList.remove('dragging');
+        };
+        handle.addEventListener('pointercancel', finishDrag);
+        handle.addEventListener('pointerup', finishDrag);
+        handle.addEventListener('click', e => e.stopPropagation());
         handle.addEventListener('keydown', e => {
           if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
-          e.preventDefault(); const next = index + (e.key === 'ArrowUp' ? -1 : 1);
+          e.preventDefault(); const index = ids.indexOf(id), next = index + (e.key === 'ArrowUp' ? -1 : 1);
           if (next < 0 || next >= ids.length) return;
           ids.splice(index, 1); ids.splice(next, 0, id); render();
           list.children[next]?.querySelector('.organizer-handle')?.focus();
@@ -1066,6 +1094,8 @@
     const tab = $('.library-tabs .tab-btn.active')?.dataset.tab;
     const content = $('#libraryContent');
     $('.main-content')?.classList.toggle('playlist-open', tab === 'playlists' && !!currentPlaylistView);
+    if (tab !== 'playlists' || !currentPlaylistView) cleanupPlaylistCoverAction?.();
+    if (tab !== 'playlists' || !currentPlaylistView) setTheme(document.documentElement.dataset.theme || 'dark');
     // Masquer la searchbar pour les playlists
     if (libSearchBar) libSearchBar.hidden = (tab === 'playlists');
     if (tab === 'all') {
@@ -1138,7 +1168,9 @@
     content.innerHTML = html;
     content.querySelectorAll('.playlist-card').forEach(card => {
       card.addEventListener('click', (e) => {
-        currentPlaylistView = card.dataset.playlistId; refreshLibraryView();
+        currentPlaylistView = card.dataset.playlistId;
+        $('.main-content').scrollTop = 0;
+        refreshLibraryView();
       });
     });
     $('#createPlaylistFromLib').addEventListener('click', async () => {
@@ -1157,11 +1189,19 @@
     const totalSec = tracks.reduce((s,t) => s + (t.duration||0), 0);
     const coverSrc = pl.coverImage ? sanitizeURL(pl.coverImage) || '' : '';
     const safeColor = /^#[0-9a-f]{6}$/i.test(pl.coverColor) ? pl.coverColor : '#555555';
-    const rgb = [1, 3, 5].map(i => parseInt(safeColor.slice(i, i + 2), 16)).join(',');
+    const palette = WavePlaylistColors.fromHex(safeColor);
+    const scroller = content.closest('.main-content');
+    const applyPalette = colors => {
+      for (const [name, channels] of Object.entries(colors)) scroller.style.setProperty(`--playlist-${name}`, channels);
+      document.documentElement.style.setProperty('--playlist-status-color', `rgb(${colors.vivid})`);
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', `rgb(${colors.vivid})`);
+    };
+    applyPalette(palette);
+    cleanupPlaylistCoverAction?.();
 
     // ⚠️ SÉCURITÉ : esc() sur pl.name, esc() sur coverSrc
     content.innerHTML = `
-      <div class="playlist-hero" style="--playlist-rgb:${rgb}">
+      <div class="playlist-hero">
       <button class="playlist-back-btn" id="playlistBack">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg> Retour
       </button>
@@ -1201,35 +1241,48 @@
     }
     renderSortRow($('#playlistSortZone'), playlistSort, () => renderPlaylistDetail(plId), pl, tracks);
     const hero = content.querySelector('.playlist-hero');
-    const scroller = content.closest('.main-content');
+    const coverButton = $('#playlistCoverBtn');
+    const hideCoverAction = () => coverButton.classList.remove('cover-actions-visible');
+    const dismissOutside = e => {
+      if (!hero.isConnected) { cleanupPlaylistCoverAction?.(); return; }
+      if (!coverButton.contains(e.target)) hideCoverAction();
+    };
+    document.addEventListener('pointerdown', dismissOutside, true);
+    scroller.addEventListener('touchmove', hideCoverAction, { passive:true });
+    scroller.addEventListener('wheel', hideCoverAction, { passive:true });
+    cleanupPlaylistCoverAction = () => {
+      document.removeEventListener('pointerdown', dismissOutside, true);
+      scroller.removeEventListener('touchmove', hideCoverAction);
+      scroller.removeEventListener('wheel', hideCoverAction);
+      hideCoverAction(); cleanupPlaylistCoverAction = null;
+    };
     const fade = () => {
       if (!hero.isConnected) { scroller?.removeEventListener('scroll', fade); return; }
-      hero.style.setProperty('--hero-opacity', Math.max(0.12, 1 - (scroller?.scrollTop || 0) / 390));
+      const distance = Math.max(0, scroller.scrollTop);
+      hero.style.setProperty('--hero-opacity', Math.max(.2, 1 - distance / 570));
+      hero.style.setProperty('--cover-shift', `${Math.min(245, distance * .73)}px`);
+      hero.style.setProperty('--cover-alpha', Math.max(0, Math.min(1, (340 - distance) / 260)));
+      if (distance > 0) hideCoverAction();
     };
     scroller?.addEventListener('scroll', fade, { passive:true }); fade();
     if (coverSrc) {
       const cover = hero.querySelector('.playlist-detail-cover img');
       const sample = () => {
         if (!hero.isConnected) return;
-        try {
-          const canvas = document.createElement('canvas'); canvas.width = canvas.height = 12;
-          const context = canvas.getContext('2d', { willReadFrequently:true });
-          context.drawImage(cover, 0, 0, 12, 12);
-          const data = context.getImageData(0, 0, 12, 12).data;
-          let red = 0, green = 0, blue = 0, weight = 0;
-          for (let i = 0; i < data.length; i += 4) {
-            const saturation = Math.max(data[i], data[i + 1], data[i + 2]) - Math.min(data[i], data[i + 1], data[i + 2]);
-            const strength = 1 + saturation / 80;
-            red += data[i] * strength; green += data[i + 1] * strength; blue += data[i + 2] * strength; weight += strength;
-          }
-          hero.style.setProperty('--playlist-rgb', [red, green, blue].map(value => Math.round(value / weight)).join(','));
-        } catch { /* Pochette externe : garder la couleur de la playlist. */ }
+        applyPalette(WavePlaylistColors.fromImage(cover, safeColor));
       };
       if (cover.complete && cover.naturalWidth) sample(); else cover.addEventListener('load', sample, { once:true });
     }
     $('#playlistBack').addEventListener('click', () => { currentPlaylistView = null; refreshLibraryView(); });
     $('#playlistMenuBtn').addEventListener('click', () => showPlaylistOptions(pl));
-    $('#playlistCoverBtn').addEventListener('click', () => { playlistCoverInput.dataset.playlistId = plId; playlistCoverInput.click(); });
+    coverButton.addEventListener('click', () => {
+      // Sur écran tactile, premier appui révèle l'action ; deuxième appui ouvre Fichiers.
+      // Un appui extérieur ou le moindre défilement la referme immédiatement.
+      if (matchMedia('(hover: none)').matches && !coverButton.classList.contains('cover-actions-visible')) {
+        coverButton.classList.add('cover-actions-visible'); return;
+      }
+      hideCoverAction(); playlistCoverInput.dataset.playlistId = plId; playlistCoverInput.click();
+    });
     $('#playlistShuffleBtn').addEventListener('click', () => shufflePlay(tracks));
     $('#playlistAddTracksBtn').addEventListener('click', () => openPlaylistSearchModal(plId));
   }
