@@ -980,3 +980,27 @@ html[data-theme="light"] .icon-btn:hover { background:rgba(0,0,0,.06); }
     scroll-behavior:auto !important;
   }
 }
+
+/* A single restrained motion language. Translate/opacity avoid layout on each frame. */
+:root { --motion-ease:cubic-bezier(.22,1,.36,1); }
+@keyframes wave-sheet-in { from { opacity:.5; transform:translateY(32px); } to { opacity:1; transform:translateY(0); } }
+@keyframes wave-backdrop-in { from { background-color:transparent; } }
+.view { animation:none; }
+/* Opacity only on the view: transforms here would displace fixed playlist headers. */
+.view.active { animation:wave-view-opacity 240ms var(--motion-ease); }
+@keyframes wave-view-opacity { from { opacity:.4; } to { opacity:1; } }
+.options-sheet, .settings-sheet, .sort-sheet, .organizer-panel, .modal, .confirm-box {
+  animation:wave-sheet-in 320ms var(--motion-ease);
+}
+.options-overlay, .settings-overlay, .sort-sheet-backdrop, .organizer-overlay, .modal-overlay, .confirm-overlay {
+  animation:wave-backdrop-in 240ms ease-out;
+}
+.now-playing-screen { animation:slideUpScreen 360ms var(--motion-ease); }
+button, .playlist-card { transition:scale 150ms var(--motion-ease), background-color 180ms ease, color 180ms ease, opacity 180ms ease; }
+button:active, .playlist-card:active { scale:.96; }
+.organizer-handle:active { scale:1; }
+.main-content { overflow-x:hidden; }
+@media (prefers-reduced-motion:reduce) {
+  *, *::before, *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; scroll-behavior:auto !important; }
+  button:active, .playlist-card:active { scale:1; }
+}

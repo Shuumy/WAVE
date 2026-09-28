@@ -27,7 +27,8 @@ jobs:
       - name: Check JavaScript syntax
         run: |
           node --check js/app.js
+          node --check js/navigation-motion.js
           node --check js/organizer-drag.js
           node --check js/playlist-colors.js
       - name: Check drag lifecycle and playlist colors
-        run: node --test tests/organizer-drag.test.js tests/playlist-colors.test.js
+        run: node --test tests/organizer-drag.test.js tests/playlist-colors.test.js tests/navigation-motion.test.js
