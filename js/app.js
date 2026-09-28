@@ -118,6 +118,8 @@
   let playlistSort = { key: 'default', dir: 'asc' };
   let cleanupPlaylistCoverAction = null;
   let cleanupPlaylistScroll = null;
+  let cleanupPlaylistSwipe = null;
+  let playlistGridScroll = 0;
   let libraryCustomOrder = (await DB.getSetting('libraryCustomOrder')) || [];
   if (!Array.isArray(libraryCustomOrder)) libraryCustomOrder = [];
   let shuffleActive = false;
@@ -128,9 +130,9 @@
     return new Promise((resolve) => {
       // Utilise textContent pour éviter toute injection dans le message de confirmation
       confirmMessage.textContent = message;
-      confirmModal.hidden = false;
+      WaveMotion.open(confirmModal);
       const cleanup = (result) => {
-        confirmModal.hidden = true;
+        WaveMotion.close(confirmModal);
         confirmYes.onclick = null;
         confirmNo.onclick  = null;
         resolve(result);
@@ -140,7 +142,7 @@
     });
   }
   confirmModal.addEventListener('click', (e) => {
-    if (e.target === confirmModal) { confirmModal.hidden = true; }
+    if (e.target === confirmModal) { WaveMotion.close(confirmModal); }
   });
 
   function formatTotalDuration(s) {
@@ -176,7 +178,7 @@
       $(`#view${btn.dataset.view.charAt(0).toUpperCase() + btn.dataset.view.slice(1)}`).classList.add('active');
       currentPlaylistView = null;
       cleanupPlaylistCoverAction?.();
-      cleanupPlaylistScroll?.();
+      cleanupPlaylistScroll?.(); cleanupPlaylistSwipe?.();
       $('.main-content')?.classList.remove('playlist-open');
       setTheme(document.documentElement.dataset.theme || 'dark');
       if (btn.dataset.view === 'library') refreshLibraryView();
@@ -218,11 +220,11 @@
   DB.getSetting('theme').then(theme => setTheme(theme === 'light' ? 'light' : 'dark'));
   settingsBtn.addEventListener('click', () => {
     settingsMain.hidden = false; settingsPanel.hidden = true;
-    settingsOverlay.hidden = false;
+    WaveMotion.open(settingsOverlay);
   });
-  closeSettingsBtn.addEventListener('click', () => { settingsOverlay.hidden = true; });
-  settingsOverlay.addEventListener('click', (e) => { if (e.target === settingsOverlay) settingsOverlay.hidden = true; });
-  $('#settingsBack').addEventListener('click', () => { settingsPanel.hidden = true; settingsMain.hidden = false; });
+  closeSettingsBtn.addEventListener('click', () => { WaveMotion.close(settingsOverlay); });
+  settingsOverlay.addEventListener('click', (e) => { if (e.target === settingsOverlay) WaveMotion.close(settingsOverlay); });
+  $('#settingsBack').addEventListener('click', () => { settingsPanel.hidden = true; settingsMain.hidden = false; WaveMotion.enter(settingsMain, -1); });
   $$('.settings-entry').forEach(entry => entry.addEventListener('click', () => {
     const panel = entry.dataset.settingsPanel;
     settingsPanelTitle.textContent = entry.querySelector('strong').textContent;
@@ -242,7 +244,7 @@
         link.href = href; link.textContent = label; settingsPanelContent.appendChild(link);
       }
     }
-    settingsMain.hidden = true; settingsPanel.hidden = false;
+    settingsMain.hidden = true; settingsPanel.hidden = false; WaveMotion.enter(settingsPanel);
   }));
 
   // ===== Profile Picture =====
@@ -284,7 +286,7 @@
     cropImage.style.height = `${cropSource.naturalHeight * scale}px`;
     cropImage.style.transform = `translate(-50%, -50%) translate(${cropOffset.x}px, ${cropOffset.y}px) rotate(${cropRotation}deg)`;
   }
-  function closeCrop() { cropOverlay.hidden = true; cropSource = null; cropImage.removeAttribute('src'); }
+  function closeCrop() { WaveMotion.close(cropOverlay); cropSource = null; }
   $('#cropCancel').addEventListener('click', closeCrop);
   $('#cropRotate').addEventListener('click', () => { cropRotation = (cropRotation + 90) % 360; cropOffset = { x:0, y:0 }; updateCrop(); });
   cropZoom.addEventListener('input', updateCrop);
@@ -350,7 +352,7 @@
       img.onload = () => {
         cropSource = img; cropImage.src = dataUrl;
         cropRotation = 0; cropOffset = { x:0, y:0 }; cropZoom.value = '1';
-        cropOverlay.hidden = false; updateCrop();
+        WaveMotion.open(cropOverlay); updateCrop();
       };
       img.onerror = () => showToast('Image illisible');
       img.src = dataUrl;
@@ -478,13 +480,13 @@
         option.addEventListener('click', () => {
           if (st.key === key && key !== 'custom') st.dir = st.dir === 'asc' ? 'desc' : 'asc';
           else { st.key = key; st.dir = key === 'title' || key === 'artist' || key === 'custom' ? 'asc' : 'desc'; }
-          overlay.remove(); onChange();
+          WaveMotion.close(overlay, true); onChange();
         });
         sheet.appendChild(option);
       });
       overlay.appendChild(sheet);
-      overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-      overlay.addEventListener('keydown', e => { if (e.key === 'Escape') overlay.remove(); });
+      overlay.addEventListener('click', e => { if (e.target === overlay) WaveMotion.close(overlay, true); });
+      overlay.addEventListener('keydown', e => { if (e.key === 'Escape') WaveMotion.close(overlay, true); });
       document.body.appendChild(overlay);
       sheet.querySelector('button')?.focus();
     });
@@ -514,7 +516,7 @@
     const dragController = WaveOrganizerDrag.attach(list, overlay, order => {
       ids.splice(0, ids.length, ...order);
     });
-    const closeOrganizer = () => { dragController.destroy(); overlay.remove(); };
+    const closeOrganizer = () => { dragController.destroy(); WaveMotion.close(overlay, true); };
     const updateSelected = () => {
       remove.disabled = !selected.size;
       remove.textContent = `${playlist || favoritesView ? 'Retirer' : 'Supprimer'} (${selected.size})`;
@@ -752,7 +754,7 @@
         });
     }
 
-    optionsOverlay.hidden = false;
+    WaveMotion.open(optionsOverlay);
   }
 
   function showPlaylistOptions(pl) {
@@ -784,10 +786,10 @@
       await DB.deletePlaylist(pl.id);
       currentPlaylistView = null; showToast('Playlist supprimée'); refreshLibraryView();
     }, true);
-    optionsOverlay.hidden = false;
+    WaveMotion.open(optionsOverlay);
   }
 
-  function closeOptionsSheet() { optionsOverlay.hidden = true; }
+  function closeOptionsSheet() { WaveMotion.close(optionsOverlay); }
   optionsOverlay.addEventListener('click', (e) => { if (e.target === optionsOverlay) closeOptionsSheet(); });
 
   const trackEditModal = $('#trackEditModal');
@@ -800,7 +802,7 @@
   let coverToken = 0;
   function closeTrackEdit() {
     coverToken++;
-    trackEditModal.hidden = true; editingTrack = null;
+    WaveMotion.close(trackEditModal); editingTrack = null;
     trackEditForm.reset();
   }
   function openTrackEdit(track) {
@@ -812,7 +814,7 @@
     $('#trackEditArtist').value = track.artist;
     trackEditCover.value = '';
     trackEditPreview.src = sanitizeURL(generateArtwork(track));
-    trackEditModal.hidden = false;
+    WaveMotion.open(trackEditModal);
     $('#trackEditTitle').focus();
   }
   $('#trackEditClose').addEventListener('click', closeTrackEdit);
@@ -989,15 +991,15 @@
         opt.addEventListener('click', async () => {
           for (const tid of modalTrackIds) await DB.addTrackToPlaylist(pl.id, tid);
           showToast(`${modalTrackIds.length > 1 ? modalTrackIds.length + ' morceaux ajoutés' : 'Ajouté'} à "${pl.name}"`);
-          playlistModal.hidden = true;
+          WaveMotion.close(playlistModal);
         });
         playlistModalBody.appendChild(opt);
       });
     }
-    playlistModal.hidden = false;
+    WaveMotion.open(playlistModal);
   }
-  closePlaylistModal.addEventListener('click', () => { playlistModal.hidden = true; });
-  playlistModal.addEventListener('click', (e) => { if (e.target === playlistModal) playlistModal.hidden = true; });
+  closePlaylistModal.addEventListener('click', () => { WaveMotion.close(playlistModal); });
+  playlistModal.addEventListener('click', (e) => { if (e.target === playlistModal) WaveMotion.close(playlistModal); });
   createPlaylistBtn.addEventListener('click', async () => {
     const raw = prompt('Nom de la playlist:');
     const name = validatePlaylistName(raw);
@@ -1007,7 +1009,7 @@
       for (const tid of modalTrackIds) await DB.addTrackToPlaylist(pl.id, tid);
       showToast(`"${pl.name}" créée avec ${modalTrackIds.length} morceau${modalTrackIds.length !== 1 ? 'x' : ''}`);
     } else { showToast(`"${pl.name}" créée`); }
-    playlistModal.hidden = true;
+    WaveMotion.close(playlistModal);
     const at = $('.library-tabs .tab-btn.active');
     if (at?.dataset.tab === 'playlists') refreshLibraryView();
   });
@@ -1062,7 +1064,7 @@
     const tab = $('.library-tabs .tab-btn.active')?.dataset.tab;
     const content = $('#libraryContent');
     $('.main-content')?.classList.toggle('playlist-open', tab === 'playlists' && !!currentPlaylistView);
-    if (tab !== 'playlists' || !currentPlaylistView) { cleanupPlaylistCoverAction?.(); cleanupPlaylistScroll?.(); }
+    if (tab !== 'playlists' || !currentPlaylistView) { cleanupPlaylistCoverAction?.(); cleanupPlaylistScroll?.(); cleanupPlaylistSwipe?.(); }
     if (tab !== 'playlists' || !currentPlaylistView) setTheme(document.documentElement.dataset.theme || 'dark');
     // Masquer la searchbar pour les playlists
     if (libSearchBar) libSearchBar.hidden = (tab === 'playlists');
@@ -1106,6 +1108,7 @@
   async function renderPlaylistsGrid() {
     const content = $('#libraryContent');
     const pls = await DB.getPlaylists();
+    if (currentPlaylistView || $('.library-tabs .tab-btn.active')?.dataset.tab !== 'playlists') return;
     if (!pls.length) {
       content.innerHTML = `<div style="text-align:center;padding:40px 20px"><p class="empty-state">Aucune playlist.</p><button class="import-btn" id="createPlaylistFromLib" style="margin-top:16px">+ Nouvelle playlist</button></div>`;
       $('#createPlaylistFromLib').addEventListener('click', async () => {
@@ -1135,10 +1138,12 @@
     html += '</div><div style="text-align:center;margin-top:20px"><button class="import-btn" id="createPlaylistFromLib">+ Nouvelle playlist</button></div>';
     content.innerHTML = html;
     content.querySelectorAll('.playlist-card').forEach(card => {
-      card.addEventListener('click', (e) => {
+      card.addEventListener('click', async (e) => {
+        playlistGridScroll = $('.main-content').scrollTop;
         currentPlaylistView = card.dataset.playlistId;
         $('.main-content').scrollTop = 0;
-        refreshLibraryView();
+        await refreshLibraryView();
+        WaveMotion.enter(content);
       });
     });
     $('#createPlaylistFromLib').addEventListener('click', async () => {
@@ -1151,7 +1156,8 @@
 
   async function renderPlaylistDetail(plId) {
     const pl = await DB.getPlaylist(plId);
-    if (!pl) { currentPlaylistView = null; renderPlaylistsGrid(); return; }
+    if (currentPlaylistView !== plId) return;
+    if (!pl) { currentPlaylistView = null; refreshLibraryView(); return; }
     const content = $('#libraryContent');
     const tracks = pl.trackIds.map(id => findTrack(id)).filter(Boolean);
     const totalSec = tracks.reduce((s,t) => s + (t.duration||0), 0);
@@ -1165,7 +1171,7 @@
     };
     applyPalette(palette);
     cleanupPlaylistCoverAction?.();
-    cleanupPlaylistScroll?.();
+    cleanupPlaylistScroll?.(); cleanupPlaylistSwipe?.();
 
     // ⚠️ SÉCURITÉ : esc() sur pl.name, esc() sur coverSrc
     content.innerHTML = `
@@ -1245,7 +1251,7 @@
       if (distance > 0) hideCoverAction();
     };
     const onScroll = () => {
-      if (!hero.isConnected) { cleanupPlaylistScroll?.(); return; }
+      if (!hero.isConnected) { cleanupPlaylistScroll?.(); cleanupPlaylistSwipe?.(); return; }
       if (!scrollFrame) scrollFrame = requestAnimationFrame(paintScroll);
     };
     scroller.addEventListener('scroll', onScroll, { passive:true }); paintScroll();
@@ -1261,7 +1267,15 @@
       };
       if (cover.complete && cover.naturalWidth) sample(); else cover.addEventListener('load', sample, { once:true });
     }
-    const backToPlaylists = () => { currentPlaylistView = null; refreshLibraryView(); };
+    const backToPlaylists = async () => {
+      currentPlaylistView = null;
+      await refreshLibraryView();
+      scroller.scrollTop = playlistGridScroll;
+      WaveMotion.enter(content, -1);
+    };
+    cleanupPlaylistSwipe = WaveMotion.edgeBack(scroller, content, backToPlaylists, () =>
+      !!document.querySelector('.organizer-overlay, .sort-sheet-backdrop, .options-overlay:not([hidden]), .settings-overlay:not([hidden]), .modal-overlay:not([hidden]), .confirm-overlay:not([hidden]), .now-playing-screen:not([hidden])'));
+
     $('#playlistBack').addEventListener('click', backToPlaylists);
     $('#playlistCompactBack').addEventListener('click', backToPlaylists);
     $('#playlistMenuBtn').addEventListener('click', () => showPlaylistOptions(pl));
@@ -1306,7 +1320,7 @@
   });
 
   function openPlaylistSearchModal(plId) {
-    playlistSearchModal.hidden = false;
+    WaveMotion.open(playlistSearchModal);
     playlistSearchModal.dataset.playlistId = plId;
     playlistSearchInput.value = '';
     renderPlaylistSearchResults(plId, '');
@@ -1352,8 +1366,8 @@
     const plId = playlistSearchModal.dataset.playlistId; if (!plId) return;
     renderPlaylistSearchResults(plId, playlistSearchInput.value.toLowerCase().trim());
   });
-  closePlaylistSearchModal.addEventListener('click', () => { playlistSearchModal.hidden = true; });
-  playlistSearchModal.addEventListener('click', (e) => { if (e.target === playlistSearchModal) playlistSearchModal.hidden = true; });
+  closePlaylistSearchModal.addEventListener('click', () => { WaveMotion.close(playlistSearchModal); });
+  playlistSearchModal.addEventListener('click', (e) => { if (e.target === playlistSearchModal) WaveMotion.close(playlistSearchModal); });
 
   function refreshImportView() { /* section "Mes fichiers importés" supprimée */ }
 
@@ -1366,11 +1380,12 @@
   }
 
   $$('.library-tabs .tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       $$('.library-tabs .tab-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       currentPlaylistView = null;
-      refreshLibraryView();
+      await refreshLibraryView();
+      WaveMotion.enter($('#libraryContent'));
     });
   });
 
@@ -1394,7 +1409,7 @@
   const npBtnRepeat      = $('#npBtnRepeat');
 
   function openNowPlaying() {
-    nowPlayingScreen.hidden = false;
+    WaveMotion.open(nowPlayingScreen);
     document.body.classList.add('np-open');
     // Sync current state into NP screen
     const track = Player.getCurrentTrack();
@@ -1416,7 +1431,7 @@
     updateRepeatButtons(repeatMode);
   }
   function closeNowPlaying() {
-    nowPlayingScreen.hidden = true;
+    WaveMotion.close(nowPlayingScreen);
     document.body.classList.remove('np-open');
   }
   nowPlayingClose.addEventListener('click', closeNowPlaying);
