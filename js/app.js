@@ -120,6 +120,8 @@
   let cleanupPlaylistScroll = null;
   let cleanupPlaylistSwipe = null;
   let playlistGridScroll = 0;
+  let playlistGridFrame = null;
+  const viewScrollPositions = new Map();
   let libraryCustomOrder = (await DB.getSetting('libraryCustomOrder')) || [];
   if (!Array.isArray(libraryCustomOrder)) libraryCustomOrder = [];
   let shuffleActive = false;
@@ -172,18 +174,25 @@
   // ===== Navigation =====
   navBtns.forEach(btn => {
     btn.addEventListener('click', () => {
-      navBtns.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      views.forEach(v => v.classList.remove('active'));
-      $(`#view${btn.dataset.view.charAt(0).toUpperCase() + btn.dataset.view.slice(1)}`).classList.add('active');
-      currentPlaylistView = null;
-      cleanupPlaylistCoverAction?.();
-      cleanupPlaylistScroll?.(); cleanupPlaylistSwipe?.();
-      $('.main-content')?.classList.remove('playlist-open');
-      setTheme(document.documentElement.dataset.theme || 'dark');
-      if (btn.dataset.view === 'library') refreshLibraryView();
-      if (btn.dataset.view === 'home')    refreshHomeView();
-      if (btn.dataset.view === 'import')  refreshImportView();
+      if (btn.classList.contains('active')) return;
+      const scroller = $('.main-content');
+      WaveMotion.navigate(scroller, async () => {
+        const previous = $('.nav-btn.active')?.dataset.view;
+        if (previous) viewScrollPositions.set(previous, scroller.scrollTop);
+        navBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        views.forEach(v => v.classList.remove('active'));
+        $(`#view${btn.dataset.view.charAt(0).toUpperCase() + btn.dataset.view.slice(1)}`).classList.add('active');
+        currentPlaylistView = null;
+        cleanupPlaylistCoverAction?.();
+        cleanupPlaylistScroll?.(); cleanupPlaylistSwipe?.();
+        scroller.classList.remove('playlist-open');
+        setTheme(document.documentElement.dataset.theme || 'dark');
+        if (btn.dataset.view === 'library') await refreshLibraryView();
+        if (btn.dataset.view === 'home') await refreshHomeView();
+        if (btn.dataset.view === 'import') refreshImportView();
+        scroller.scrollTop = viewScrollPositions.get(btn.dataset.view) || 0;
+      });
     });
   });
 
@@ -1139,11 +1148,15 @@
     content.innerHTML = html;
     content.querySelectorAll('.playlist-card').forEach(card => {
       card.addEventListener('click', async (e) => {
-        playlistGridScroll = $('.main-content').scrollTop;
-        currentPlaylistView = card.dataset.playlistId;
-        $('.main-content').scrollTop = 0;
-        await refreshLibraryView();
-        WaveMotion.enter(content);
+        const scroller = $('.main-content');
+        await WaveMotion.navigate(scroller, async () => {
+          playlistGridScroll = scroller.scrollTop;
+          playlistGridFrame = WaveMotion.snapshot(scroller);
+          currentPlaylistView = card.dataset.playlistId;
+          await refreshLibraryView();
+          scroller.scrollTop = 0;
+          scroller.dispatchEvent(new Event('scroll'));
+        }, 1);
       });
     });
     $('#createPlaylistFromLib').addEventListener('click', async () => {
@@ -1267,17 +1280,21 @@
       };
       if (cover.complete && cover.naturalWidth) sample(); else cover.addEventListener('load', sample, { once:true });
     }
-    const backToPlaylists = async () => {
-      currentPlaylistView = null;
-      await refreshLibraryView();
-      scroller.scrollTop = playlistGridScroll;
-      WaveMotion.enter(content, -1);
+    const backToPlaylists = async (fromGesture = false) => {
+      const render = async () => {
+        currentPlaylistView = null;
+        await refreshLibraryView();
+        scroller.scrollTop = playlistGridScroll;
+      };
+      if (fromGesture) await render();
+      else await WaveMotion.navigate(scroller, render, -1);
     };
-    cleanupPlaylistSwipe = WaveMotion.edgeBack(scroller, content, backToPlaylists, () =>
-      !!document.querySelector('.organizer-overlay, .sort-sheet-backdrop, .options-overlay:not([hidden]), .settings-overlay:not([hidden]), .modal-overlay:not([hidden]), .confirm-overlay:not([hidden]), .now-playing-screen:not([hidden])'));
+    cleanupPlaylistSwipe = WaveMotion.edgeBack(scroller, content, () => backToPlaylists(true), () =>
+      !!document.querySelector('.organizer-overlay, .sort-sheet-backdrop, .options-overlay:not([hidden]), .settings-overlay:not([hidden]), .modal-overlay:not([hidden]), .confirm-overlay:not([hidden]), .now-playing-screen:not([hidden])'),
+      () => WaveMotion.swipeVisual(scroller, () => playlistGridFrame));
 
-    $('#playlistBack').addEventListener('click', backToPlaylists);
-    $('#playlistCompactBack').addEventListener('click', backToPlaylists);
+    $('#playlistBack').addEventListener('click', () => backToPlaylists());
+    $('#playlistCompactBack').addEventListener('click', () => backToPlaylists());
     $('#playlistMenuBtn').addEventListener('click', () => showPlaylistOptions(pl));
     coverButton.addEventListener('click', () => {
       // Sur écran tactile, premier appui révèle l'action ; deuxième appui ouvre Fichiers.
@@ -1380,12 +1397,16 @@
   }
 
   $$('.library-tabs .tab-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      $$('.library-tabs .tab-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      currentPlaylistView = null;
-      await refreshLibraryView();
-      WaveMotion.enter($('#libraryContent'));
+    btn.addEventListener('click', () => {
+      if (btn.classList.contains('active')) return;
+      const scroller = $('.main-content');
+      WaveMotion.navigate(scroller, async () => {
+        $$('.library-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentPlaylistView = null;
+        await refreshLibraryView();
+        scroller.scrollTop = 0;
+      });
     });
   });
 

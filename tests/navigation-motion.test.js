@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
-function fixture(reduced = true) {
+function fixture(reduced = true, visualFactory = null, backHandler = () => {}) {
   const animations=[];
   const node = () => ({
     animate() { let resolve, reject; const finished=new Promise((yes,no)=>{resolve=yes;reject=no;}); const a={finished,resolve,cancel:()=>reject(new Error("cancelled"))}; animations.push(a); return a; },
@@ -20,7 +20,7 @@ function fixture(reduced = true) {
   const context=vm.createContext({ matchMedia:()=>({matches:reduced}), window:win, document:doc,
     requestAnimationFrame:fn=>{raf.set(++id,fn);return id;}, cancelAnimationFrame:id=>raf.delete(id) });
   vm.runInContext(fs.readFileSync('js/navigation-motion.js','utf8')+'\nthis.motion=WaveMotion;', context);
-  const cleanup=context.motion.edgeBack(surface,content,()=>back++,()=>blocked);
+  const cleanup=context.motion.edgeBack(surface,content,()=>{back++;return backHandler();},()=>blocked,visualFactory);
   return {surface,content,win,doc,cleanup,animations,back:()=>back,block:()=>blocked=true,paint:()=>{for(const fn of raf.values())fn();raf.clear();}};
 }
 test('left edge follows the finger and commits a deliberate rightward swipe',()=>{
@@ -70,4 +70,17 @@ test('a tap on a left-edge button is not swallowed',()=>{
 test('backgrounding during the completion animation cancels navigation',async()=>{
   const f=fixture(false);f.surface.emit('touchstart',8);f.surface.emit('touchmove',200,100,200);f.surface.emit('touchend',200,100,210);
   f.win.emit('blur');await new Promise(resolve=>setImmediate(resolve));assert.equal(f.back(),0);
+});
+
+test('swipe destination stays visible until asynchronous navigation finishes',async()=>{
+  let disposed=0, resolveBack, progress=0;
+  const done=new Promise(resolve=>resolveBack=resolve);
+  const visual={update:x=>progress=x,dispose:()=>disposed++,animate:()=>[]};
+  const f=fixture(false,()=>visual,()=>done);
+  f.surface.emit('touchstart',8);f.surface.emit('touchmove',200,100,200);f.paint();
+  assert.equal(progress,192);assert.equal(f.content.children[0].style.translate,undefined);
+  f.surface.emit('touchend',200,100,210);await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.back(),1);assert.equal(disposed,0);assert.equal(progress,390);
+  f.cleanup();assert.equal(disposed,0);
+  resolveBack();await new Promise(resolve=>setImmediate(resolve));assert.equal(disposed,1);
 });

@@ -986,9 +986,8 @@ html[data-theme="light"] .icon-btn:hover { background:rgba(0,0,0,.06); }
 @keyframes wave-sheet-in { from { opacity:.5; transform:translateY(32px); } to { opacity:1; transform:translateY(0); } }
 @keyframes wave-backdrop-in { from { background-color:transparent; } }
 .view { animation:none; }
-/* Opacity only on the view: transforms here would displace fixed playlist headers. */
-.view.active { animation:wave-view-opacity 240ms var(--motion-ease); }
-@keyframes wave-view-opacity { from { opacity:.4; } to { opacity:1; } }
+/* Navigation owns its animation; avoid a second fade on the live view. */
+.view.active { animation:none; }
 .options-sheet, .settings-sheet, .sort-sheet, .organizer-panel, .modal, .confirm-box {
   animation:wave-sheet-in 320ms var(--motion-ease);
 }
@@ -1003,4 +1002,14 @@ button:active, .playlist-card:active { scale:.96; }
 @media (prefers-reduced-motion:reduce) {
   *, *::before, *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; scroll-behavior:auto !important; }
   button:active, .playlist-card:active { scale:1; }
+}
+
+/* Frozen viewport layers live only for navigation, never during normal scrolling. */
+.motion-frame {
+  position:fixed; z-index:40; overflow:hidden; pointer-events:none;
+  background:var(--bg-primary); transform:translate3d(0,0,0);
+  contain:layout paint; will-change:transform,opacity;
+}
+.motion-frame *, .motion-frame *::before, .motion-frame *::after {
+  animation:none !important; transition:none !important;
 }
