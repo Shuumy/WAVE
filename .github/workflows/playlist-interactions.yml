@@ -1,0 +1,33 @@
+name: Playlist interaction checks
+
+on:
+  pull_request:
+    paths:
+      - 'js/**'
+      - 'tests/**'
+      - '.github/workflows/playlist-interactions.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'js/**'
+      - 'tests/**'
+      - '.github/workflows/playlist-interactions.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  interactions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check JavaScript syntax
+        run: |
+          node --check js/app.js
+          node --check js/organizer-drag.js
+          node --check js/playlist-colors.js
+      - name: Check drag lifecycle and playlist colors
+        run: node --test tests/organizer-drag.test.js tests/playlist-colors.test.js
