@@ -116,6 +116,8 @@
   let librarySort = { key: 'title', dir: 'asc' };
   let librarySearchQuery = '';
   let playlistSort = { key: 'default', dir: 'asc' };
+  let libraryCustomOrder = (await DB.getSetting('libraryCustomOrder')) || [];
+  if (!Array.isArray(libraryCustomOrder)) libraryCustomOrder = [];
   let shuffleActive = false;
   let repeatMode = 'none';
 
@@ -171,6 +173,7 @@
       views.forEach(v => v.classList.remove('active'));
       $(`#view${btn.dataset.view.charAt(0).toUpperCase() + btn.dataset.view.slice(1)}`).classList.add('active');
       currentPlaylistView = null;
+      $('.main-content')?.classList.remove('playlist-open');
       if (btn.dataset.view === 'library') refreshLibraryView();
       if (btn.dataset.view === 'home')    refreshHomeView();
       if (btn.dataset.view === 'import')  refreshImportView();
@@ -402,6 +405,7 @@
 
   // ===== Sort =====
   const SORT_OPTIONS = [
+    { key:'custom',   label:'Tri personnalisé' },
     { key:'duration', label:'Durée' },
     { key:'title',    label:'Titre' },
     { key:'artist',   label:'Artiste' },
@@ -410,6 +414,11 @@
   function applySort(tracks, sortState) {
     const st = sortState || librarySort;
     if (st.key === 'default') return [...tracks]; // ordre original de la playlist
+    if (st.key === 'custom') {
+      if (st === playlistSort) return [...tracks];
+      const positions = new Map(libraryCustomOrder.map((id, i) => [id, i]));
+      return [...tracks].sort((a, b) => (positions.get(a.id) ?? Infinity) - (positions.get(b.id) ?? Infinity));
+    }
     const s = [...tracks];
     const asc = st.dir === 'asc';
     s.sort((a, b) => {
@@ -435,41 +444,151 @@
   window.addEventListener('wave:ratings-changed', () => {
     if (librarySort.key === 'rating' || playlistSort.key === 'rating') refreshLibraryView();
   });
-  function renderSortRow(container, sortState, onSortChange) {
+  function renderSortRow(container, sortState, onSortChange, playlist = null, visibleTracks = []) {
     const st = sortState || librarySort;
     const onChange = onSortChange || (() => refreshLibraryView());
     const row = document.createElement('div');
     row.className = 'sort-row';
-    const label = document.createElement('span');
-    label.className = 'sort-label';
-    label.textContent = 'Trier :';
-    row.appendChild(label);
-    SORT_OPTIONS.forEach(({ key, label: lbl }) => {
-      const btn = document.createElement('button');
-      const isActive = st.key === key;
-      btn.className = 'sort-btn' + (isActive ? ' active' : '');
-      btn.dataset.sort = key;
-      if (isActive) {
-        const dir = document.createElement('span');
-        dir.className = 'sort-dir';
-        dir.textContent = st.dir === 'asc' ? '↑' : '↓';
-        btn.textContent = lbl;
-        btn.appendChild(dir);
-      } else {
-        btn.textContent = lbl;
-      }
-      btn.addEventListener('click', () => {
-        if (st.key === key) {
-          st.dir = st.dir === 'asc' ? 'desc' : 'asc';
-        } else {
-          st.key = key;
-          st.dir = (key === 'title' || key === 'artist') ? 'asc' : 'desc';
-        }
-        onChange();
+    const edit = document.createElement('button');
+    edit.className = 'sort-pill'; edit.type = 'button';
+    edit.innerHTML = '<span aria-hidden="true">☷</span> Modifier';
+    edit.addEventListener('click', () => openTrackOrganizer(playlist, visibleTracks));
+    row.appendChild(edit);
+    const sort = document.createElement('button');
+    sort.className = 'sort-pill'; sort.type = 'button';
+    sort.innerHTML = '<span aria-hidden="true">↕</span> Trier';
+    sort.setAttribute('aria-label', 'Trier les morceaux');
+    sort.addEventListener('click', () => {
+      const overlay = document.createElement('div');
+      overlay.className = 'sort-sheet-backdrop';
+      const sheet = document.createElement('div'); sheet.className = 'sort-sheet';
+      sheet.setAttribute('role', 'dialog'); sheet.setAttribute('aria-label', 'Trier les morceaux');
+      sheet.innerHTML = '<h3>Trier par</h3>';
+      SORT_OPTIONS.forEach(({ key, label }) => {
+        const option = document.createElement('button'); option.type = 'button';
+        option.className = 'sort-sheet-option' + (st.key === key || (key === 'custom' && st.key === 'default') ? ' active' : '');
+        option.textContent = label + (st.key === key && key !== 'custom' ? (st.dir === 'asc' ? ' ↑' : ' ↓') : '');
+        option.addEventListener('click', () => {
+          if (st.key === key && key !== 'custom') st.dir = st.dir === 'asc' ? 'desc' : 'asc';
+          else { st.key = key; st.dir = key === 'title' || key === 'artist' || key === 'custom' ? 'asc' : 'desc'; }
+          overlay.remove(); onChange();
+        });
+        sheet.appendChild(option);
       });
-      row.appendChild(btn);
+      overlay.appendChild(sheet);
+      overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+      overlay.addEventListener('keydown', e => { if (e.key === 'Escape') overlay.remove(); });
+      document.body.appendChild(overlay);
+      sheet.querySelector('button')?.focus();
     });
+    row.appendChild(sort);
     container.insertBefore(row, container.firstChild);
+  }
+
+  // L'éditeur travaille sur une copie et enregistre seulement à « Sauvegarder ».
+  function openTrackOrganizer(playlist, tracks) {
+    const favoritesView = !playlist && $('.library-tabs .tab-btn.active')?.dataset.tab === 'favorites';
+    const allIds = playlist ? playlist.trackIds.filter(id => findTrack(id)) : favoritesView ? tracks.map(t => t.id) :
+      applySort(getAllTracks(), { key:'custom' }).map(t => t.id);
+    const ids = [...allIds];
+    const selected = new Set();
+    const overlay = document.createElement('div'); overlay.className = 'organizer-overlay';
+    overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', playlist ? 'Modifier la playlist' : 'Modifier la bibliothèque');
+    overlay.innerHTML = `<div class="organizer-panel"><div class="organizer-head">
+      <button type="button" class="organizer-cancel">Annuler</button><h3>${playlist ? 'Modifier la playlist' : 'Modifier les morceaux'}</h3>
+      <button type="button" class="organizer-save">Sauvegarder</button></div>
+      <p class="organizer-hint">Glisse ☰ pour changer l’ordre. Sélectionne des morceaux pour les retirer.</p>
+      <div class="organizer-list"></div><div class="organizer-foot">
+      <button type="button" class="organizer-all">Tout sélectionner</button>
+      <button type="button" class="organizer-remove" disabled>${playlist || favoritesView ? 'Retirer' : 'Supprimer'} (0)</button></div></div>`;
+    const list = overlay.querySelector('.organizer-list');
+    const remove = overlay.querySelector('.organizer-remove');
+    const updateSelected = () => {
+      remove.disabled = !selected.size;
+      remove.textContent = `${playlist || favoritesView ? 'Retirer' : 'Supprimer'} (${selected.size})`;
+      overlay.querySelector('.organizer-all').textContent = selected.size === ids.length && ids.length ? 'Tout désélectionner' : 'Tout sélectionner';
+    };
+    const render = () => {
+      list.innerHTML = '';
+      ids.forEach((id, index) => {
+        const track = findTrack(id); if (!track) return;
+        const row = document.createElement('div'); row.className = 'organizer-track';
+        const cover = sanitizeURL(generateArtwork(track)) || generateArtwork(track);
+        row.innerHTML = `<button type="button" class="organizer-check" aria-label="Sélectionner ${esc(track.title)}" aria-pressed="${selected.has(id)}">${selected.has(id) ? '✓' : '○'}</button>
+          <img src="${esc(cover)}" alt=""><div class="organizer-meta"><strong>${esc(track.title)}</strong><small>${esc(track.artist)}</small></div>
+          <button type="button" class="organizer-handle" aria-label="Déplacer ${esc(track.title)}">☰</button>`;
+        row.querySelector('.organizer-check').addEventListener('click', () => {
+          if (selected.has(id)) selected.delete(id); else selected.add(id);
+          render();
+        });
+        // Pointer Events fonctionne au toucher sur iPhone et à la souris.
+        const handle = row.querySelector('.organizer-handle');
+        handle.addEventListener('pointerdown', e => {
+          e.preventDefault(); handle.setPointerCapture(e.pointerId); row.classList.add('dragging');
+        });
+        handle.addEventListener('pointermove', e => {
+          if (!handle.hasPointerCapture(e.pointerId)) return;
+          const bounds = list.getBoundingClientRect();
+          if (e.clientY > bounds.bottom - 48) list.scrollTop += 18;
+          else if (e.clientY < bounds.top + 48) list.scrollTop -= 18;
+        });
+        handle.addEventListener('pointercancel', () => row.classList.remove('dragging'));
+        handle.addEventListener('pointerup', e => {
+          if (!handle.hasPointerCapture(e.pointerId)) return;
+          handle.releasePointerCapture(e.pointerId); row.classList.remove('dragging');
+          const target = document.elementFromPoint(e.clientX, e.clientY)?.closest('.organizer-track');
+          if (!target || !list.contains(target)) return;
+          const destination = [...list.children].indexOf(target);
+          if (destination < 0 || destination === index) return;
+          ids.splice(index, 1); ids.splice(destination, 0, id); render();
+        });
+        handle.addEventListener('keydown', e => {
+          if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+          e.preventDefault(); const next = index + (e.key === 'ArrowUp' ? -1 : 1);
+          if (next < 0 || next >= ids.length) return;
+          ids.splice(index, 1); ids.splice(next, 0, id); render();
+          list.children[next]?.querySelector('.organizer-handle')?.focus();
+        });
+        list.appendChild(row);
+      });
+      updateSelected();
+    };
+    overlay.querySelector('.organizer-cancel').addEventListener('click', () => overlay.remove());
+    overlay.querySelector('.organizer-all').addEventListener('click', () => {
+      if (selected.size === ids.length) selected.clear(); else ids.forEach(id => selected.add(id)); render();
+    });
+    overlay.querySelector('.organizer-remove').addEventListener('click', async () => {
+      if (!selected.size) return;
+      if (!playlist && !favoritesView && !await showConfirm(`Supprimer définitivement ${selected.size} morceau${selected.size > 1 ? 'x' : ''} de la bibliothèque ?`)) return;
+      // La suppression de la bibliothèque est appliquée à la sauvegarde.
+      selected.forEach(id => ids.splice(ids.indexOf(id), 1));
+      selected.clear(); render();
+    });
+    overlay.querySelector('.organizer-save').addEventListener('click', async () => {
+      if (playlist) {
+        const latest = await DB.getPlaylist(playlist.id);
+        if (!latest) { overlay.remove(); return; }
+        latest.trackIds = [...ids, ...latest.trackIds.filter(id => !allIds.includes(id))];
+        await DB.updatePlaylist(latest); playlistSort.key = 'custom';
+      } else {
+        const removed = allIds.filter(id => !ids.includes(id));
+        for (const id of removed) {
+          if (favoritesView) { if (await DB.isFavorite(id)) await DB.toggleFavorite(id); }
+          else await DB.removeUserTrack(id);
+        }
+        if (removed.length && !favoritesView) await loadUserTracks();
+        libraryCustomOrder = [...ids, ...getAllTracks().map(t => t.id).filter(id => !ids.includes(id))];
+        await DB.setSetting('libraryCustomOrder', libraryCustomOrder);
+        librarySort.key = 'custom';
+      }
+      overlay.remove(); refreshAllViews();
+      showToast('Ordre enregistré');
+    });
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    overlay.addEventListener('keydown', e => { if (e.key === 'Escape') overlay.remove(); });
+    document.body.appendChild(overlay); render();
+    overlay.querySelector('.organizer-cancel').focus();
   }
 
   // ===== Translitération pour recherche multilingue =====
@@ -946,12 +1065,13 @@
   async function refreshLibraryView() {
     const tab = $('.library-tabs .tab-btn.active')?.dataset.tab;
     const content = $('#libraryContent');
+    $('.main-content')?.classList.toggle('playlist-open', tab === 'playlists' && !!currentPlaylistView);
     // Masquer la searchbar pour les playlists
     if (libSearchBar) libSearchBar.hidden = (tab === 'playlists');
     if (tab === 'all') {
       content.innerHTML = '<div class="track-list" id="libraryTracks"></div>';
-      renderSortRow(content);
       const tracks = searchFilter(applySort(getAllTracks()), librarySearchQuery);
+      renderSortRow(content, librarySort, () => refreshLibraryView(), null, tracks);
       if (tracks.length) {
         const sb = document.createElement('button');
         sb.className = 'shuffle-section-btn';
@@ -965,9 +1085,9 @@
       else renderTrackList(c, tracks);
     } else if (tab === 'favorites') {
       content.innerHTML = '<div class="track-list" id="libraryTracks"></div>';
-      renderSortRow(content);
       const favs = await DB.getFavorites();
       const tracks = searchFilter(applySort(favs.map(f => findTrack(f.id)).filter(Boolean)), librarySearchQuery);
+      renderSortRow(content, librarySort, () => refreshLibraryView(), null, tracks);
       if (tracks.length) {
         const sb = document.createElement('button');
         sb.className = 'shuffle-section-btn';
@@ -1036,17 +1156,20 @@
     const tracks = pl.trackIds.map(id => findTrack(id)).filter(Boolean);
     const totalSec = tracks.reduce((s,t) => s + (t.duration||0), 0);
     const coverSrc = pl.coverImage ? sanitizeURL(pl.coverImage) || '' : '';
+    const safeColor = /^#[0-9a-f]{6}$/i.test(pl.coverColor) ? pl.coverColor : '#555555';
+    const rgb = [1, 3, 5].map(i => parseInt(safeColor.slice(i, i + 2), 16)).join(',');
 
     // ⚠️ SÉCURITÉ : esc() sur pl.name, esc() sur coverSrc
     content.innerHTML = `
+      <div class="playlist-hero" style="--playlist-rgb:${rgb}">
       <button class="playlist-back-btn" id="playlistBack">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg> Retour
       </button>
       <div class="playlist-detail-header">
-        <div class="playlist-detail-cover" style="background:${esc(pl.coverColor)}" id="playlistCoverBtn">
+        <button type="button" class="playlist-detail-cover" style="background:${safeColor}" id="playlistCoverBtn" aria-label="Changer la pochette de la playlist">
           ${coverSrc ? `<img src="${esc(coverSrc)}" alt="">` : '&#9835;'}
           <div class="playlist-cover-overlay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></div>
-        </div>
+        </button>
         <div class="playlist-detail-info">
           <h3>
             <span id="playlistNameSpan"></span>
@@ -1062,7 +1185,7 @@
             </button>
           </div>
         </div>
-      </div>
+      </div></div>
       <div id="playlistSortZone"></div>
       <div class="track-list" id="playlistTracks"></div>`;
 
@@ -1075,7 +1198,34 @@
     } else {
       const sorted = applySort(tracks, playlistSort);
       renderTrackList(plTracksContainer, sorted, { playlistId: plId, onRemoveFromPlaylist: () => renderPlaylistDetail(plId) });
-      renderSortRow($('#playlistSortZone'), playlistSort, () => renderPlaylistDetail(plId));
+    }
+    renderSortRow($('#playlistSortZone'), playlistSort, () => renderPlaylistDetail(plId), pl, tracks);
+    const hero = content.querySelector('.playlist-hero');
+    const scroller = content.closest('.main-content');
+    const fade = () => {
+      if (!hero.isConnected) { scroller?.removeEventListener('scroll', fade); return; }
+      hero.style.setProperty('--hero-opacity', Math.max(0.12, 1 - (scroller?.scrollTop || 0) / 390));
+    };
+    scroller?.addEventListener('scroll', fade, { passive:true }); fade();
+    if (coverSrc) {
+      const cover = hero.querySelector('.playlist-detail-cover img');
+      const sample = () => {
+        if (!hero.isConnected) return;
+        try {
+          const canvas = document.createElement('canvas'); canvas.width = canvas.height = 12;
+          const context = canvas.getContext('2d', { willReadFrequently:true });
+          context.drawImage(cover, 0, 0, 12, 12);
+          const data = context.getImageData(0, 0, 12, 12).data;
+          let red = 0, green = 0, blue = 0, weight = 0;
+          for (let i = 0; i < data.length; i += 4) {
+            const saturation = Math.max(data[i], data[i + 1], data[i + 2]) - Math.min(data[i], data[i + 1], data[i + 2]);
+            const strength = 1 + saturation / 80;
+            red += data[i] * strength; green += data[i + 1] * strength; blue += data[i + 2] * strength; weight += strength;
+          }
+          hero.style.setProperty('--playlist-rgb', [red, green, blue].map(value => Math.round(value / weight)).join(','));
+        } catch { /* Pochette externe : garder la couleur de la playlist. */ }
+      };
+      if (cover.complete && cover.naturalWidth) sample(); else cover.addEventListener('load', sample, { once:true });
     }
     $('#playlistBack').addEventListener('click', () => { currentPlaylistView = null; refreshLibraryView(); });
     $('#playlistMenuBtn').addEventListener('click', () => showPlaylistOptions(pl));
