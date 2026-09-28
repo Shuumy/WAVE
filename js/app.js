@@ -1161,7 +1161,6 @@
     const scroller = content.closest('.main-content');
     const applyPalette = colors => {
       for (const [name, channels] of Object.entries(colors)) scroller.style.setProperty(`--playlist-${name}`, channels);
-      document.documentElement.style.setProperty('--playlist-status-color', `rgb(${colors.vivid})`);
       document.querySelector('meta[name="theme-color"]')?.setAttribute('content', `rgb(${colors.vivid})`);
     };
     applyPalette(palette);
