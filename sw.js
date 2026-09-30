@@ -1,6 +1,7 @@
 // WAVE service worker — fichiers de l'application disponibles hors ligne.
-const CACHE_NAME = 'wave-v33';
+const CACHE_NAME = 'wave-v34';
 const ASSETS = [
+  './js/locales.js', './js/i18n.js',
   './', './index.html', './css/style.css', './css/ratings.css', './js/db.js', './js/tracks.js',
   './js/player.js', './js/samsung-bridge.js', './js/playlist-colors.js', './js/organizer-drag.js', './js/navigation-motion.js', './js/app.js', './js/ratings.js', './manifest.json',
   './assets/icons/icon-192-v2.png', './assets/icons/icon-512-v2.png', './assets/icons/favicon.svg',

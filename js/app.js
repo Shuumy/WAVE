@@ -6,6 +6,7 @@
   // Safari iOS peut signaler une hauteur dvh réduite pour une web app installée.
   if (navigator.standalone === true) document.documentElement.classList.add('ios-standalone');
   await DB.open();
+  await WaveI18n.init(DB);
 
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => document.querySelectorAll(sel);
@@ -201,7 +202,7 @@
   function showToast(msg) {
     if (!msg) { toast.classList.remove('show'); return; }
     // textContent pour éviter XSS dans les messages de toast
-    toastMessage.textContent = msg;
+    toastMessage.textContent = WaveI18n.t(msg);
     toast.hidden = false;
     toast.classList.add('show');
     clearTimeout(toastTimer);
@@ -236,7 +237,7 @@
   $('#settingsBack').addEventListener('click', () => { settingsPanel.hidden = true; settingsMain.hidden = false; WaveMotion.enter(settingsMain, -1); });
   $$('.settings-entry').forEach(entry => entry.addEventListener('click', () => {
     const panel = entry.dataset.settingsPanel;
-    settingsPanelTitle.textContent = entry.querySelector('strong').textContent;
+    settingsPanelTitle.textContent = {account:'Compte',appearance:'Affichage',languages:'Langues',legal:'Mentions légales'}[panel];
     settingsPanelContent.innerHTML = '';
     if (panel === 'appearance') {
       for (const [theme, label] of [['light','Jour (clair)'], ['dark','Nuit (sombre)']]) {
@@ -247,6 +248,8 @@
         settingsPanelContent.appendChild(button);
       }
       setTheme(document.documentElement.dataset.theme || 'dark');
+    } else if (panel === 'languages') {
+      WaveI18n.renderPicker(settingsPanelContent);
     } else if (panel === 'legal') {
       for (const [label, href] of [['Confidentialité', './confidentialite.html'], ['Informations légales et conditions d’utilisation', './conditions.html']]) {
         const link = document.createElement('a'); link.className = 'settings-legal-link';
@@ -692,6 +695,7 @@
       btn.className = 'options-item' + (cls ? ' ' + cls : '');
       btn.innerHTML = icon;
       const span = document.createElement('span');
+      span.dataset.i18n = '';
       span.textContent = label;
       btn.appendChild(span);
       btn.addEventListener('click', () => { closeOptionsSheet(); handler(); });
@@ -780,7 +784,7 @@
       const button = document.createElement('button');
       button.className = 'options-item' + (danger ? ' danger' : '');
       button.innerHTML = icon;
-      const span = document.createElement('span'); span.textContent = label; button.appendChild(span);
+      const span = document.createElement('span'); span.dataset.i18n = ''; span.textContent = label; button.appendChild(span);
       button.addEventListener('click', () => { closeOptionsSheet(); action(); });
       optionsList.appendChild(button);
     };
