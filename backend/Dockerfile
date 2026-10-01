@@ -6,11 +6,16 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libchromaprint-tools \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt ./requirements.txt
 RUN pip install --upgrade pip setuptools wheel \
     && pip install -r requirements.txt
 
 COPY main.py ./main.py
+COPY identify.py ./identify.py
+COPY identify_match.py ./identify_match.py
 COPY start.sh ./start.sh
 RUN chmod 755 /app/start.sh \
     && useradd --create-home --uid 10001 wave \

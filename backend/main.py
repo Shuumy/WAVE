@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from ytmusicapi import YTMusic
+from identify import router as identify_router
 
 APP_VERSION = "2.0.0"
 DEFAULT_FRONTEND_ORIGINS = (
@@ -37,12 +38,13 @@ app = FastAPI(
 )
 
 yt_music = YTMusic()
+app.include_router(identify_router)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins(),
     allow_credentials=False,
-    allow_methods=["GET", "OPTIONS"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Accept", "Content-Type"],
     max_age=3600,
 )
