@@ -5,7 +5,7 @@ Backend FastAPI utilisé par WAVE pour effectuer des recherches publiques sur Yo
 ## Sécurité
 
 - aucun mot de passe, cookie YouTube ou jeton OAuth n'est stocké dans le dépôt ;
-- seules les routes `GET` et `OPTIONS` sont autorisées par CORS ;
+- les routes `GET`, `POST` et `OPTIONS` sont autorisées par CORS ;
 - les origines front-end autorisées sont configurées avec `FRONTEND_ORIGINS` ;
 - la longueur des recherches et le nombre de résultats sont limités ;
 - des en-têtes de sécurité sont ajoutés à toutes les réponses.

@@ -250,6 +250,9 @@
       setTheme(document.documentElement.dataset.theme || 'dark');
     } else if (panel === 'languages') {
       WaveI18n.renderPicker(settingsPanelContent);
+    } else if (panel === 'identification') {
+      settingsPanelTitle.textContent = 'Identification des morceaux';
+      WaveIdentify.settings(settingsPanelContent);
     } else if (panel === 'legal') {
       for (const [label, href] of [['Confidentialité', './confidentialite.html'], ['Informations légales et conditions d’utilisation', './conditions.html']]) {
         const link = document.createElement('a'); link.className = 'settings-legal-link';
@@ -625,8 +628,9 @@
       script.integrity = 'sha384-JpTt7qxVx1X/pHeYiCfqFdKRu2HF1MBGr1kEXtbNIGwwryGWMbbW78onU3bdkAHZ';
       script.crossOrigin = 'anonymous';
       script.referrerPolicy = 'no-referrer';
-      script.onload = resolve;
-      script.onerror = reject;
+      const deadline = setTimeout(() => { script.remove(); reject(new Error('Metadata timeout')); }, 8000);
+      script.onload = () => { clearTimeout(deadline); resolve(); };
+      script.onerror = () => { clearTimeout(deadline); reject(new Error('Metadata unavailable')); };
       document.head.appendChild(script);
     }).catch(() => { metadataScriptPromise = null; });
     return metadataScriptPromise;
@@ -663,7 +667,7 @@
                 if (dataUrl.startsWith('data:image/')) coverArt = dataUrl;
               } catch {}
             }
-            resolve({ title, artist, album, genre, releaseYear, coverArt });
+            resolve({ title, artist, album, genre, releaseYear, coverArt, tagged:!!(t.title && t.artist) });
           },
           onError: () => resolve(fallback),
         });
@@ -767,6 +771,30 @@
         });
     }
 
+    if (track.userImported) {
+      const state = track.identification;
+      const status = document.createElement('p'); status.className = 'language-note';
+      status.textContent = track.metadataLocked ? 'Informations protégées : modifiées par toi.' :
+        ({pending:'Identification en attente de connexion ou de nouvelle tentative.',matched:'Identifié via '+(state?.source||'les métadonnées')+'.',review:'Identification : propositions à vérifier.',unavailable:'Recherche effectuée. Reconnaissance audio non configurée.',unmatched:'Aucune correspondance suffisamment fiable.'}[state?.status] || 'Identification non demandée.');
+      optionsList.appendChild(status);
+      for (const candidate of state?.candidates || []) {
+        addItem('', `Utiliser : ${candidate.artist} — ${candidate.title}`, '', async () => {
+          if (!await showConfirm(`Remplacer les informations par « ${candidate.title} » — ${candidate.artist} ?`)) return;
+          const updated=await DB.updateUserTrack(track.id,{title:candidate.title,artist:candidate.artist,metadataLocked:true,
+            originalMetadata:track.originalMetadata||{title:track.title,artist:track.artist},identification:{...state,status:'confirmed'}});
+          if(updated) await refreshIdentifiedTrack(updated);
+        });
+      }
+      addItem('', 'Rechercher les informations du morceau', '', async () => {
+        if(track.metadataLocked) {showToast('Tes corrections sont protégées.');return;}
+        if(!track.originalMetadata) await DB.updateUserTrack(track.id,{originalMetadata:{title:track.title,artist:track.artist}});
+        await WaveIdentify.retry(track);showToast('Identification mise en attente');
+      });
+      if(track.originalMetadata) addItem('', 'Rétablir les informations d’origine', '', async () => {
+        const updated=await DB.updateUserTrack(track.id,{...track.originalMetadata,metadataLocked:true,identification:{status:'restored'}});
+        if(updated) await refreshIdentifiedTrack(updated);
+      });
+    }
     WaveMotion.open(optionsOverlay);
   }
 
@@ -864,7 +892,8 @@
     const title = $('#trackEditTitle').value.trim();
     const artist = $('#trackEditArtist').value.trim();
     if (!title || !artist) { showToast('Indique un titre et un artiste.'); return; }
-    const changes = { title, artist, coverArt:editedCover };
+    const changes = { title, artist, coverArt:editedCover, metadataLocked:true,
+      originalMetadata:editingTrack.originalMetadata||{title:editingTrack.title,artist:editingTrack.artist} };
     try {
       await DB.updateUserTrack(editingTrack.id, changes);
       Object.assign(editingTrack, changes);
@@ -1752,9 +1781,7 @@
     });
   }
   function parseName(name) {
-    const base = name.replace(/\.[^.]+$/, '');
-    const m = base.match(/^(.+?)\s*[-–—]\s*(.+)$/);
-    return m ? { artist:m[1].trim(), title:m[2].trim() } : { artist:'Artiste inconnu', title:base.trim() };
+    return WaveIdentify.name(name);
   }
   function randColor() {
     return ['#e94560','#7b2ff7','#00b4d8','#ff9800','#4caf50','#ff5722','#9c27b0','#3f51b5','#00e676','#f44336'][Math.floor(Math.random()*10)];
@@ -1773,7 +1800,7 @@
         fail++; continue;
       }
 
-      const { title, artist, album, genre, releaseYear, coverArt } = await extractAllMetadata(file);
+      const { title, artist, album, genre, releaseYear, coverArt, tagged } = await extractAllMetadata(file);
       const { valid, duration } = await validateAudio(file);
       if (!valid) { fail++; continue; }
 
@@ -1785,7 +1812,9 @@
         title, artist, album, duration:Math.round(duration),
         genre, releaseYear, color:randColor(), userImported:true,
         fileName:file.name, importedAt:Date.now(), coverArt:safeCoverArt,
+        metadataSource:tagged?'tags':'filename',
       };
+      Object.assign(meta,WaveIdentify.initial(meta));
       await DB.saveUserTrack(meta, file);
       userTracks.push(meta); ok++;
       const pct = Math.round(((ok+fail)/list.length)*100);
@@ -1794,7 +1823,7 @@
     }
     showToast(ok > 0 ? `${ok} morceau${ok>1?'x':''} importé${ok>1?'s':''}` : 'Format non supporté');
     setTimeout(() => { importProgress.hidden=true; importProgressFill.style.width='0%'; }, 2000);
-    refreshImportView(); refreshHomeView();
+    refreshImportView(); refreshHomeView(); WaveIdentify.wake();
   }
   fileInput.addEventListener('change', () => { if(fileInput.files.length) { importFiles(fileInput.files); fileInput.value=''; } });
   importDropzone.addEventListener('click', (e) => { if(!e.target.closest('.import-btn') && e.target.tagName!=='LABEL') fileInput.click(); });
@@ -2150,8 +2179,25 @@
   }
 
   // ===== Init =====
+  async function refreshIdentifiedTrack(updated) {
+    const previous=findTrack(updated.id);
+    if(previous) Object.assign(previous,updated);
+    const current=Player.getCurrentTrack();
+    if(current?.id===updated.id) {
+      Object.assign(current,updated);
+      playerTitle.textContent=nowPlayingTitle.textContent=updated.title;
+      playerArtist.textContent=nowPlayingArtist.textContent=updated.artist;
+      if('mediaSession' in navigator) navigator.mediaSession.metadata=new MediaMetadata({title:updated.title,artist:updated.artist,album:updated.album||''});
+    }
+    // Update just the labels: a background response must not rebuild a scrolling playlist.
+    $$('.track-item').forEach(row=>{if(row.dataset.trackId===updated.id){
+      row.querySelector('.track-title').textContent=updated.title;
+      row.querySelector('.track-artist').textContent=updated.artist;
+    }});
+  }
   syncYTAPIState();
   await loadUserTracks();
+  await WaveIdentify.init(DB,WAVE_API_BASE_URL,refreshIdentifiedTrack,extractAllMetadata);
   await loadProfilePicture();
   refreshHomeView();
   volumeFill.style.width = `${Player.getVolume()*100}%`;

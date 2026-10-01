@@ -79,9 +79,33 @@ const DB = (() => {
   }
 
   async function updateUserTrack(id, changes) {
-    const track = await get('tracks', id);
-    if (!track?.userImported) throw new Error('Morceau introuvable.');
-    await put('tracks', { ...track, ...changes, id });
+    return mutateTrack(id, track => ({...track,...changes,id}));
+  }
+
+  function mutateTrack(id, change) {
+    return new Promise((resolve,reject) => {
+      const tx = db.transaction('tracks','readwrite');
+      const tracks = tx.objectStore('tracks'); let updated = null;
+      const request = tracks.get(id);
+      request.onsuccess = () => {
+        if (!request.result?.userImported) return;
+        updated = change(request.result);
+        if (updated) tracks.put(updated);
+      };
+      tx.oncomplete = () => resolve(updated);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('Enregistrement interrompu'));
+    });
+  }
+
+  function saveIdentification(snapshot, identification, match = null) {
+    return mutateTrack(snapshot.id, track => {
+      // Re-read and compare inside one transaction: late network replies cannot
+      // resurrect deleted tracks or overwrite manual edits from another tab.
+      if (track.metadataLocked || track.title !== snapshot.title || track.artist !== snapshot.artist) return null;
+      const changes = match ? {title:match.title,artist:match.artist} : {};
+      return {...track,...changes,identification};
+    });
   }
 
   async function removeUserTrack(id) {
@@ -223,6 +247,7 @@ const DB = (() => {
     getUserTracks,
     saveUserTrack,
     updateUserTrack,
+    saveIdentification,
     removeUserTrack,
     getUserAudioBlob,
     getSetting,

@@ -1,6 +1,7 @@
 // WAVE service worker — fichiers de l'application disponibles hors ligne.
-const CACHE_NAME = 'wave-v34';
+const CACHE_NAME = 'wave-v35';
 const ASSETS = [
+  './js/identify.js',
   './js/locales.js', './js/i18n.js',
   './', './index.html', './css/style.css', './css/ratings.css', './js/db.js', './js/tracks.js',
   './js/player.js', './js/samsung-bridge.js', './js/playlist-colors.js', './js/organizer-drag.js', './js/navigation-motion.js', './js/app.js', './js/ratings.js', './manifest.json',
@@ -27,6 +28,16 @@ self.addEventListener('fetch', event => {
   if (url.hostname === '127.0.0.1' || url.hostname === 'localhost') return;
 
   if (url.origin !== self.location.origin) {
+    if (url.href === 'https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js') {
+      event.respondWith(caches.open(CACHE_NAME).then(async cache => {
+        const cached = await cache.match(request);
+        if (cached) return cached;
+        const response = await fetch(request);
+        if (response.ok) await cache.put(request,response.clone());
+        return response;
+      }));
+      return;
+    }
     event.respondWith(fetch(request));
     return;
   }
