@@ -3,6 +3,31 @@ import re
 import unicodedata
 
 
+def clean_title(value):
+    # Remove only explicit upload labels, never performance/version qualifiers.
+    value = re.sub(r'[\[（(【](?:official\s*(?:music\s*)?(?:video|audio)|original\s+anime\s+mv|mv|pv|lyrics?|visuali[sz]er|\d{3,4}p)[\]）)】]', ' ', value, flags=re.I)
+    return ' '.join(value.split())
+
+
+def clean_artist(value):
+    return re.sub(r'\s+[-–—]\s+Topic\s*$', '', value, flags=re.I).strip()
+
+
+def search_queries(title, artist):
+    def quote(value):
+        return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+    exact = 'recording:' + quote(title)
+    if artist:
+        exact += ' AND artist:' + quote(artist)
+    # Upload titles often combine title and artist in one field. Search each
+    # word in either field without assuming an order or inventing a split.
+    words = re.findall(r'\w+', title, flags=re.UNICODE)[:16]
+    broad = ' AND '.join('(recording:' + quote(w) + ' OR artist:' + quote(w) + ')' for w in words)
+    if artist and broad:
+        broad += ' AND artist:' + quote(artist)
+    return list(dict.fromkeys(q for q in [exact, broad] if q))
+
+
 def classify_audio(hits, duration):
     scored = []
     for hit in hits:

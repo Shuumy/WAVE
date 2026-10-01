@@ -11,7 +11,7 @@ import urllib.request
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from starlette.concurrency import run_in_threadpool
-from identify_match import classify, classify_audio
+from identify_match import classify, classify_audio, clean_title, clean_artist, search_queries
 
 router = APIRouter()
 gate = threading.Lock()
@@ -48,13 +48,23 @@ def capabilities():
 @router.get('/api/identify/search')
 def search(title: str = Query(min_length=1, max_length=200), artist: str = Query(default='', max_length=200),
            duration: float = Query(default=0, ge=0, le=86400)):
-    def literal(value):
-        return value.replace('\\', '\\\\').replace('"', '\\"')
-    query = 'recording:"' + literal(title) + '"'
-    if artist:
-        query += ' AND artist:"' + literal(artist) + '"'
-    url = 'https://musicbrainz.org/ws/2/recording/?' + urllib.parse.urlencode({'query': query, 'fmt': 'json', 'limit': 8})
-    return classify(request_json(url).get('recordings', []), title, artist, duration)
+    title, artist = clean_title(title), clean_artist(artist)
+    if not title:
+        return classify([], title, artist, duration)
+    recordings = []
+    result = classify([], title, artist, duration)
+    for query in search_queries(title, artist):
+        url = 'https://musicbrainz.org/ws/2/recording/?' + urllib.parse.urlencode({'query': query, 'fmt': 'json', 'limit': 8})
+        try:
+            recordings.extend(request_json(url).get('recordings', []))
+        except HTTPException:
+            if recordings:
+                break  # Preserve useful suggestions if the fallback times out.
+            raise
+        result = classify(recordings, title, artist, duration)
+        if result['status'] == 'matched':
+            break
+    return result
 
 
 def recognize(content):

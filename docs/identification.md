@@ -29,6 +29,22 @@ Les réponses tardives sont rejetées dans une transaction si le morceau a été
 supprimé ou modifié manuellement. Une restauration de l’original protège aussi les
 champs contre de nouveaux remplacements automatiques.
 
+### Recherche de titres provenant de vidéos
+
+Les marqueurs explicites tels que `【MV】` sont retirés de la requête, ainsi que
+le suffixe de chaîne ` - Topic` du champ artiste. Live, remix et cover restent
+présents. Après une recherche exacte infructueuse, une seconde requête limitée
+cherche les mots du titre dans les champs titre ou artiste. Par exemple,
+`【MV】 九尾 9Lana` peut retrouver `九尾` / `9Lana` sans inventer une séparation.
+Ce résultat élargi est proposé à confirmation : il ne suffit pas à justifier
+une correction automatique sans artiste initial fiable.
+
+Le menu indique explicitement l’absence de résultat textuel. Une recherche
+manuelle signale sa fin par un message et les propositions restent dans le menu
+du morceau. Les morceaux protégés peuvent être relancés après confirmation
+explicite ; les informations d’origine sont conservées. Une modification faite
+entre l’ouverture de la confirmation et sa validation annule cette relance.
+
 ## Déploiement requis
 
 1. Merger la PR et déployer le backend Render depuis `backend/Dockerfile`.

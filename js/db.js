@@ -98,6 +98,15 @@ const DB = (() => {
     });
   }
 
+  function queueIdentification(snapshot, unlock = false) {
+    return mutateTrack(snapshot.id, track => {
+      if (track.title !== snapshot.title || track.artist !== snapshot.artist || (track.metadataLocked && !unlock)) return null;
+      return {...track,metadataLocked:false,
+        originalMetadata:track.originalMetadata || {title:track.title,artist:track.artist},
+        identification:{status:'pending',attempts:0,nextAttempt:0,manual:true}};
+    });
+  }
+
   function saveIdentification(snapshot, identification, match = null) {
     return mutateTrack(snapshot.id, track => {
       // Re-read and compare inside one transaction: late network replies cannot
@@ -248,6 +257,7 @@ const DB = (() => {
     saveUserTrack,
     updateUserTrack,
     saveIdentification,
+    queueIdentification,
     removeUserTrack,
     getUserAudioBlob,
     getSetting,

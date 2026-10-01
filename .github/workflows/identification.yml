@@ -19,8 +19,8 @@ jobs:
         with:
           python-version: '3.12'
       - run: node --check js/identify.js && node --check js/db.js && node --test tests/identify.test.js tests/identify-db.test.js
-      - run: python -m unittest discover -s tests -p 'test_identify*.py'
       - run: pip install -r backend/requirements.txt
+      - run: python -m unittest discover -s tests -p 'test_identify*.py'
       - name: Import real API routes
         working-directory: backend
         run: python -c "from identify import router; assert len(router.routes) == 3"

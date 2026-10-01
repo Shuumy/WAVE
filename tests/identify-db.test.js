@@ -9,6 +9,17 @@ async function fixture(record) {
   const c=vm.createContext({indexedDB});vm.runInContext(fs.readFileSync('js/db.js','utf8')+'\nthis.api=DB;',c);await c.api.open();return {db:c.api,rows};
 }
 const base={id:'a',userImported:true,title:'Original',artist:'Artist'};
+test('explicit retry unlocks only with consent, preserving original data and rejecting stale views',async()=>{
+  const f=await fixture({...base,metadataLocked:true,originalMetadata:{title:'Import',artist:'Unknown'}});
+  assert.equal(await f.db.queueIdentification(base),null);
+  assert.equal(await f.db.queueIdentification({...base,title:'Stale'},true),null);
+  const updated=await f.db.queueIdentification(base,true);
+  assert.equal(updated.metadataLocked,false);
+  assert.equal(updated.originalMetadata.title,'Import');
+  assert.equal(updated.identification.status,'pending');
+  assert.equal(updated.identification.manual,true);
+  const missing=await fixture();assert.equal(await missing.db.queueIdentification(base,true),null);
+});
 test('deleted tracks and late automatic results never recreate or override manual corrections',async()=>{
   const deleted=await fixture();assert.equal(await deleted.db.saveIdentification(base,{status:'matched'},{title:'New',artist:'New'}),null);assert.equal(deleted.rows.size,0);
   const manual=await fixture({...base,metadataLocked:true,title:'My correction'});
