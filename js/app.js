@@ -684,6 +684,7 @@
 
   function showTrackOptions(track, ctx = {}) {
     optionsOverlay.dataset.context = 'track';
+    optionsOverlay.dataset.trackId = track.id;
     // Artwork
     const artSrc = sanitizeURL(generateArtwork(track)) || generateArtwork(track);
     optionsArtwork.innerHTML = '';
@@ -774,8 +775,8 @@
     if (track.userImported) {
       const state = track.identification;
       const status = document.createElement('p'); status.className = 'language-note';
-      status.textContent = track.metadataLocked ? 'Informations protégées : modifiées par toi.' :
-        ({pending:'Identification en attente de connexion ou de nouvelle tentative.',matched:'Identifié via '+(state?.source||'les métadonnées')+'.',review:'Identification : propositions à vérifier.',unavailable:'Recherche effectuée. Reconnaissance audio non configurée.',unmatched:'Aucune correspondance suffisamment fiable.'}[state?.status] || 'Identification non demandée.');
+      status.dataset.identificationStatus = '';
+      status.textContent = WaveIdentify.describe(track);
       optionsList.appendChild(status);
       for (const candidate of state?.candidates || []) {
         addItem('', `Utiliser : ${candidate.artist} — ${candidate.title}`, '', async () => {
@@ -786,9 +787,11 @@
         });
       }
       addItem('', 'Rechercher les informations du morceau', '', async () => {
-        if(track.metadataLocked) {showToast('Tes corrections sont protégées.');return;}
-        if(!track.originalMetadata) await DB.updateUserTrack(track.id,{originalMetadata:{title:track.title,artist:track.artist}});
-        await WaveIdentify.retry(track);showToast('Identification mise en attente');
+        if(!WaveIdentify.isEnabled()) {showToast('Active l’identification dans les paramètres.');return;}
+        const snapshot={...track};
+        if(snapshot.metadataLocked && !await showConfirm('Autoriser une nouvelle identification de ce morceau ? Une correspondance fiable pourra remplacer tes corrections actuelles.')) return;
+        const queued=await WaveIdentify.retry(snapshot,!!snapshot.metadataLocked);
+        showToast(queued ? (navigator.onLine===false ? 'Recherche en attente de connexion' : 'Recherche demandée. Le résultat sera signalé ici.') : 'Le morceau a changé. Rouvre son menu pour réessayer.');
       });
       if(track.originalMetadata) addItem('', 'Rétablir les informations d’origine', '', async () => {
         const updated=await DB.updateUserTrack(track.id,{...track.originalMetadata,metadataLocked:true,identification:{status:'restored'}});
@@ -2181,6 +2184,8 @@
   // ===== Init =====
   async function refreshIdentifiedTrack(updated) {
     const previous=findTrack(updated.id);
+    const resultArrived=updated.identification?.manual && updated.identification.checkedAt &&
+      updated.identification.checkedAt!==previous?.identification?.checkedAt;
     if(previous) Object.assign(previous,updated);
     const current=Player.getCurrentTrack();
     if(current?.id===updated.id) {
@@ -2194,6 +2199,15 @@
       row.querySelector('.track-title').textContent=updated.title;
       row.querySelector('.track-artist').textContent=updated.artist;
     }});
+    if(optionsOverlay.dataset.context==='track' && optionsOverlay.dataset.trackId===String(updated.id)) {
+      const status=optionsList.querySelector('[data-identification-status]');
+      if(status) status.textContent=updated.identification?.status==='review'
+        ? 'Résultats trouvés. Rouvre ce menu pour choisir une proposition.' : WaveIdentify.describe(updated);
+    }
+    if(resultArrived) showToast(updated.identification.status==='matched'
+      ? `Identifié : ${updated.artist} — ${updated.title}`
+      : updated.identification.status==='review' ? 'Propositions trouvées : ouvre les ⋯ du morceau pour les confirmer.'
+      : 'Aucun résultat textuel trouvé. Le titre et l’artiste ont été conservés.');
   }
   syncYTAPIState();
   await loadUserTracks();

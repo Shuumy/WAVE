@@ -35,3 +35,13 @@ test('network failures persist exponential retry state and resume on online even
 test('malformed successful replies cannot erase title and artist',async()=>{
   const f=fixture({result:{status:'matched',match:{title:'',artist:null},candidates:[]}});await f.run();assert.equal(f.track.title,'Song');assert.equal(f.track.identification.status,'unmatched');
 });
+test('manual searches persist a result notification marker and expose honest no-result wording',async()=>{
+  const f=fixture({result:{status:'unmatched',candidates:[]}});
+  f.track.identification.manual=true;
+  await f.run();
+  assert.equal(f.updates[0].phase,'searching');
+  assert.equal(f.track.identification.manual,true);
+  assert.match(f.api.describe(f.track),/Aucune correspondance/);
+  f.track.identification.status='unavailable';
+  assert.match(f.api.describe(f.track),/Aucun résultat textuel/);
+});

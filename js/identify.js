@@ -55,7 +55,7 @@ const WaveIdentify = (() => {
     const match=result.status==='matched' && validMatch(result.match)?result.match:null;
     const identification={status:match?'matched':candidates.length?'review':audioUnavailable?'unavailable':'unmatched',
       source:result.source,candidates,checkedAt:Date.now(),reason:audioUnavailable?'audio-not-configured':tooLarge?'audio-size-limit':null,
-      attempts:(track.identification?.attempts||0)+1};
+      attempts:(track.identification?.attempts||0)+1,manual:!!track.identification?.manual};
     if(!preferences.enabled) return;
     const updated=await db.saveIdentification(track,identification,match);
     if(updated) await onUpdate(updated);
@@ -69,10 +69,14 @@ const WaveIdentify = (() => {
         for(const track of await db.getUserTracks()) {
           if(!available()) break;
           if(track.metadataLocked || track.identification?.status!=='pending' || track.identification.nextAttempt>Date.now()) continue;
-          try {await identify(track);} catch {
+          try {
+            const running=await db.saveIdentification(track,{...track.identification,phase:'searching'});
+            if(!running) continue;
+            await onUpdate(running);await identify(running);
+          } catch {
             const attempts=(track.identification.attempts||0)+1;
             const updated=await db.saveIdentification(track,{...track.identification,status:'pending',attempts,
-              nextAttempt:Date.now()+Math.min(86400000,30000*2**Math.min(attempts,12)),reason:'network'});
+              nextAttempt:Date.now()+Math.min(86400000,30000*2**Math.min(attempts,12)),reason:'network',phase:'waiting'});
             if(updated) await onUpdate(updated);
           }
         }
@@ -82,10 +86,24 @@ const WaveIdentify = (() => {
     } finally {busy=false;wake(60000);}
   }
   function wake(delay=0) {clearTimeout(timer);timer=setTimeout(()=>run().catch(()=>wake(60000)),delay);}
-  async function retry(track) {
-    if(track.metadataLocked) return false;
-    const updated=await db.saveIdentification(track,{status:'pending',attempts:0,nextAttempt:0});
+  async function retry(track, unlock=false) {
+    if(!preferences.enabled || (track.metadataLocked && !unlock)) return false;
+    const updated=await db.queueIdentification(track,unlock);
     if(updated) {await onUpdate(updated);wake();}return !!updated;
+  }
+  function describe(track) {
+    if(track.metadataLocked) return 'Informations protégées. Une nouvelle recherche nécessite ton accord.';
+    const state=track.identification;
+    if(state?.status==='pending') {
+      if(!preferences.enabled) return 'Identification désactivée dans les paramètres.';
+      if(navigator.onLine===false) return 'En attente de connexion Internet.';
+      if(state.reason==='network') return 'Le service ne répond pas. Une nouvelle tentative est prévue.';
+      return state.phase==='searching' ? 'Recherche sur Internet en cours…' : 'Recherche en attente…';
+    }
+    return ({matched:'Identifié via '+(state?.source||'les métadonnées')+'.',
+      review:'Résultats trouvés : choisis une proposition ci-dessous pour la confirmer.',
+      unavailable:'Aucun résultat textuel trouvé. La reconnaissance audio n’est pas configurée.',
+      unmatched:'Aucune correspondance trouvée. Les informations ont été conservées.'}[state?.status] || 'Identification non demandée.');
   }
   async function settings(host) {
     host.replaceChildren();
@@ -110,5 +128,5 @@ const WaveIdentify = (() => {
     window.addEventListener('online',()=>wake());
     document.addEventListener('visibilitychange',()=>{if(!document.hidden)wake();});wake();
   }
-  return {name,clean,initial,init,wake,retry,settings,validMatch};
+  return {name,clean,initial,init,wake,retry,settings,validMatch,describe,isEnabled:()=>preferences.enabled};
 })();
