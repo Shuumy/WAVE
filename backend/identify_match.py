@@ -2,6 +2,57 @@
 import re
 import unicodedata
 import math
+from difflib import SequenceMatcher
+
+
+def best_result(result, title, artist, duration):
+    """One defensible result or no change, never a list for the user to sort.
+
+    Compare full identities, bilingual title variants, performance qualifiers,
+    duration and the gap to the next distinct identity. These are matching
+    heuristics, not a trained model or a guarantee of identification.
+    """
+    if result.get('status') == 'matched':
+        return {**result, 'candidates': []}
+    title_key, artist_key = normalize(clean_title(title)), normalize(clean_artist(artist))
+    versions = lambda s: set(re.findall(r'\b(?:live|remix|cover|instrumental|karaoke|sped|slowed|acoustic|tour)\b', s))
+    ranked = {}
+    for item in result.get('candidates', []):
+        candidate_title = normalize(clean_title(item['title']))
+        candidate_artist = normalize(clean_artist(item['artist']))
+        if not candidate_title or not candidate_artist:
+            continue
+        query_title = title_key
+        embedded = False
+        for prefix, suffix in [(candidate_artist+' ', ''), ('', ' '+candidate_artist)]:
+            if prefix and query_title.startswith(prefix):
+                query_title = query_title[len(prefix):]; embedded = True; break
+            if suffix and query_title.endswith(suffix):
+                query_title = query_title[:-len(suffix)]; embedded = True; break
+        if (artist_key and artist_key != candidate_artist) or (not artist_key and not embedded):
+            continue
+        if versions(query_title) != versions(candidate_title):
+            continue
+        similarity = SequenceMatcher(None, query_title, candidate_title).ratio()
+        # Explicit bilingual titles such as 新世界 - Shinsekai, not arbitrary
+        # partial-word hits or a substring buried in a different song title.
+        aliases = [normalize(clean_title(p)) for p in re.split(r'\s+[-–—/]\s+', item['title'])]
+        if query_title in aliases and len(query_title) >= 3:
+            similarity = 1.0
+        try:
+            seconds = float(item.get('duration') or 0)
+        except (ValueError, TypeError):
+            continue
+        if not math.isfinite(seconds) or seconds <= 0 or duration <= 0 or abs(seconds-duration) > 4 or similarity < .9:
+            continue
+        score = .85*similarity + .15*(1-abs(seconds-duration)/5)
+        key = (candidate_title, candidate_artist)
+        if key not in ranked or score > ranked[key][0]:
+            ranked[key] = (score, item)
+    ordered = sorted(ranked.values(), key=lambda pair: pair[0], reverse=True)
+    match = ordered[0][1] if ordered and (len(ordered)==1 or ordered[0][0]-ordered[1][0] >= .08) else None
+    return {'source': match.get('source',result.get('source')) if match else result.get('source'),
+            'status':'matched' if match else 'unmatched', 'match':match, 'candidates':[]}
 
 
 def classify_youtube(rows, title, artist, duration):

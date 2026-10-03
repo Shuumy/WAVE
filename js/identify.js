@@ -51,16 +51,15 @@ const WaveIdentify = (() => {
         } else tooLarge=true;
       } else audioUnavailable=true;
     }
-    const candidates=(Array.isArray(result.candidates)?result.candidates:[]).filter(validMatch).slice(0,5);
     const match=result.status==='matched' && validMatch(result.match)?result.match:null;
-    const identification={status:match?'matched':candidates.length?'review':audioUnavailable?'unavailable':'unmatched',
-      source:result.source,candidates,checkedAt:Date.now(),reason:audioUnavailable?'audio-not-configured':tooLarge?'audio-size-limit':null,
+    const identification={status:match?'matched':audioUnavailable?'unavailable':'unmatched',
+      source:result.source,candidates:[],checkedAt:Date.now(),reason:audioUnavailable?'audio-not-configured':tooLarge?'audio-size-limit':null,
       attempts:(track.identification?.attempts||0)+1,manual:!!track.identification?.manual};
-    if(!preferences.enabled) return;
+    if(!preferences.enabled && !track.identification?.manual) return;
     const updated=await db.saveIdentification(track,identification,match);
     if(updated) await onUpdate(updated);
   }
-  const available=()=>preferences.enabled && navigator.onLine!==false && !document.hidden;
+  const available=()=>navigator.onLine!==false && !document.hidden;
   async function run() {
     if(busy || !available()) return;
     busy=true;
@@ -68,7 +67,7 @@ const WaveIdentify = (() => {
       const work=async()=>{
         for(const track of await db.getUserTracks()) {
           if(!available()) break;
-          if(track.metadataLocked || track.identification?.status!=='pending' || track.identification.nextAttempt>Date.now()) continue;
+          if((!preferences.enabled && !track.identification?.manual) || track.metadataLocked || track.identification?.status!=='pending' || track.identification.nextAttempt>Date.now()) continue;
           try {
             const running=await db.saveIdentification(track,{...track.identification,phase:'searching'});
             if(!running) continue;
@@ -87,12 +86,12 @@ const WaveIdentify = (() => {
   }
   function wake(delay=0) {clearTimeout(timer);timer=setTimeout(()=>run().catch(()=>wake(60000)),delay);}
   async function retry(track, unlock=false) {
-    if(!preferences.enabled || (track.metadataLocked && !unlock)) return false;
+    if(!canIdentify(track) || (track.metadataLocked && !unlock)) return false;
     const updated=await db.queueIdentification(track,unlock);
     if(updated) {await onUpdate(updated);wake();}return !!updated;
   }
   function describe(track) {
-    if(track.metadataLocked) return 'Informations protégées. Une nouvelle recherche nécessite ton accord.';
+    if(track.metadataLocked) return '';
     const state=track.identification;
     if(state?.status==='pending') {
       if(!preferences.enabled) return 'Identification désactivée dans les paramètres.';
@@ -105,22 +104,6 @@ const WaveIdentify = (() => {
       unavailable:'Aucun résultat textuel trouvé. La reconnaissance audio n’est pas configurée.',
       unmatched:'Aucune correspondance trouvée. Les informations ont été conservées.'}[state?.status] || 'Identification non demandée.');
   }
-  async function settings(host) {
-    host.replaceChildren();
-    for(const [key,label] of [['enabled','Identifier automatiquement les nouveaux morceaux'],['audio','Reconnaissance audio si la recherche ne suffit pas']]) {
-      const row=document.createElement('label');row.className='language-choice';
-      const text=document.createElement('span');text.textContent=label;
-      const input=document.createElement('input');input.type='checkbox';input.checked=preferences[key];
-      input.addEventListener('change',async()=>{
-        const value=input.checked;input.disabled=true;
-        try {await db.setSetting('identificationPreferences',{...preferences,[key]:value});preferences[key]=value;wake();}
-        catch {input.checked=preferences[key];}finally {input.disabled=false;}
-      });row.append(text,input);host.append(row);
-    }
-    const note=document.createElement('p');note.className='language-note';
-    note.textContent='En ligne, WAVE recherche le titre et l’artiste sur YouTube Music, puis sur MusicBrainz si nécessaire, et compare la durée. Une correspondance fiable est enregistrée automatiquement ; sinon, les propositions sont disponibles dans le menu du morceau. Si nécessaire et si le service audio est configuré, un fichier de 25 Mo maximum est envoyé temporairement à WAVE pour calculer son empreinte, transmise à AcoustID. Les corrections restent sur cet appareil. Safari ne permet pas de garantir une connexion Wi-Fi uniquement.';
-    host.append(note);
-  }
   async function init(database,base,callback,reader) {
     db=database;api=base;onUpdate=callback;readMetadata=reader;
     const saved=await db.getSetting('identificationPreferences');
@@ -128,5 +111,6 @@ const WaveIdentify = (() => {
     window.addEventListener('online',()=>wake());
     document.addEventListener('visibilitychange',()=>{if(!document.hidden)wake();});wake();
   }
-  return {name,clean,initial,init,wake,retry,settings,validMatch,describe,isEnabled:()=>preferences.enabled};
+  function canIdentify(track) { return !['matched','confirmed'].includes(track.identification?.status); }
+  return {name,clean,initial,init,wake,retry,validMatch,describe,canIdentify};
 })();

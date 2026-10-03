@@ -1,10 +1,10 @@
 name: Identification checks
 on:
   pull_request:
-    paths: ['backend/**', 'js/identify.js', 'js/db.js', 'tests/**', '.github/workflows/identification.yml']
+    paths: ['backend/**', 'js/identify.js', 'js/db.js', 'js/mobile-interactions.js', 'tests/**', '.github/workflows/identification.yml']
   push:
     branches: [main]
-    paths: ['backend/**', 'js/identify.js', 'js/db.js', 'tests/**', '.github/workflows/identification.yml']
+    paths: ['backend/**', 'js/identify.js', 'js/db.js', 'js/mobile-interactions.js', 'tests/**', '.github/workflows/identification.yml']
 permissions:
   contents: read
 jobs:
@@ -18,7 +18,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: node --check js/identify.js && node --check js/db.js && node --test tests/identify.test.js tests/identify-db.test.js
+      - run: node --check js/app.js && node --check js/identify.js && node --check js/db.js && node --check js/mobile-interactions.js && node --test tests/identify.test.js tests/identify-db.test.js tests/mobile-interactions.test.js
       - run: pip install -r backend/requirements.txt
       - run: python -m unittest discover -s tests -p 'test_identify*.py'
       - name: Import real API routes

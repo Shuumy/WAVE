@@ -26,6 +26,14 @@ test('deleted tracks and late automatic results never recreate or override manua
   assert.equal(await manual.db.saveIdentification(base,{status:'matched'},{title:'New',artist:'New'}),null);
   assert.equal(manual.rows.get('a').title,'My correction');
 });
+test('a completed correction cannot be queued from a stale menu, but editing and restoration allow it',async()=>{
+  const f=await fixture({...base,identification:{status:'matched'}});
+  assert.equal(await f.db.queueIdentification(base,true),null);
+  for(const status of ['edited','restored']) {
+    await f.db.updateUserTrack('a',{identification:{status},metadataLocked:true});
+    assert.ok(await f.db.queueIdentification(base,true));
+  }
+});
 test('metadata and identification result commit together without losing playlist-independent track data',async()=>{
   const f=await fixture({...base,coverArt:'local-cover',originalMetadata:{title:'Original',artist:'Artist'}});
   const result=await f.db.saveIdentification(base,{status:'matched',source:'MusicBrainz'},{title:'Corrected',artist:'Artist'});
