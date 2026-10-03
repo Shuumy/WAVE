@@ -6,12 +6,20 @@ from unittest.mock import patch
 from urllib.parse import urlparse, parse_qs
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'backend'))
 try:
-    from identify import search, HTTPException
+    from identify import search_sources as search, search as public_search, HTTPException
 except ModuleNotFoundError as exc:
     raise unittest.SkipTest('API dependencies unavailable: ' + str(exc))
 
 
 class SearchTests(unittest.TestCase):
+    def test_public_endpoint_returns_one_match_and_no_proposals(self):
+        row={'id':'example','title':'九尾','artist-credit':[{'name':'9Lana'}],'length':241557}
+        with patch('identify.request_json',return_value={'recordings':[row]}):
+            result=public_search('【MV】 九尾 9Lana','',241)
+        self.assertEqual(result['status'],'matched')
+        self.assertEqual(result['match']['title'],'九尾')
+        self.assertEqual(result['candidates'],[])
+
     def setUp(self):
         mocked = patch('identify.request_youtube', return_value=[])
         self.youtube = mocked.start()

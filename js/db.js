@@ -100,6 +100,7 @@ const DB = (() => {
 
   function queueIdentification(snapshot, unlock = false) {
     return mutateTrack(snapshot.id, track => {
+      if (['matched','confirmed'].includes(track.identification?.status)) return null;
       if (track.title !== snapshot.title || track.artist !== snapshot.artist || (track.metadataLocked && !unlock)) return null;
       return {...track,metadataLocked:false,
         originalMetadata:track.originalMetadata || {title:track.title,artist:track.artist},

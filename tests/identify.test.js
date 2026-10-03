@@ -23,10 +23,16 @@ test('filename cleaning retains performance qualifiers and avoids guessing hyphe
 test('offline, hidden and manually corrected imports are not sent',async()=>{
   for(const options of [{online:false},{hidden:true},{locked:true}]){const f=fixture(options);await f.run();assert.equal(f.calls.length,0);assert.equal(f.updates.length,0);}
 });
-test('confident matches persist while uncertain results stay suggestions',async()=>{
+test('confident matches persist while uncertain results leave metadata unchanged without a list',async()=>{
   const f=fixture();await f.run();assert.equal(f.track.identification.status,'matched');
   const uncertain=fixture({result:{status:'review',source:'MusicBrainz',candidates:[{title:'Other',artist:'Someone'}]}});
-  await uncertain.run();assert.equal(uncertain.track.title,'Song');assert.equal(uncertain.track.identification.status,'review');
+  await uncertain.run();assert.equal(uncertain.track.title,'Song');assert.equal(uncertain.track.identification.status,'unmatched');assert.equal(uncertain.track.identification.candidates.length,0);
+});
+test('successful corrections hide the action until manual editing or restoration',()=>{
+  const f=fixture();
+  for(const status of ['matched','confirmed']) assert.equal(f.api.canIdentify({identification:{status}}),false);
+  for(const status of ['edited','restored','unmatched','pending']) assert.equal(f.api.canIdentify({identification:{status}}),true);
+  assert.equal(f.api.describe({metadataLocked:true}),'');
 });
 test('network failures persist exponential retry state and resume on online event',async()=>{
   const f=fixture({fail:true});await f.run();assert.equal(f.track.identification.status,'pending');assert.equal(f.track.identification.attempts,1);assert.ok(f.track.identification.nextAttempt>Date.now());

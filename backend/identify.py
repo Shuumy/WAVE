@@ -11,7 +11,7 @@ import urllib.request
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from starlette.concurrency import run_in_threadpool
-from identify_match import classify, classify_audio, classify_youtube, clean_title, clean_artist, search_queries
+from identify_match import classify, classify_audio, classify_youtube, clean_title, clean_artist, search_queries, best_result
 
 router = APIRouter()
 gate = threading.Lock()
@@ -85,9 +85,7 @@ def request_youtube(query):
         youtube_gate.release()
 
 
-@router.get('/api/identify/search')
-def search(title: str = Query(min_length=1, max_length=200), artist: str = Query(default='', max_length=200),
-           duration: float = Query(default=0, ge=0, le=86400)):
+def search_sources(title, artist, duration):
     title, artist = clean_title(title), clean_artist(artist)
     if not title:
         return classify([], title, artist, duration)
@@ -116,6 +114,12 @@ def search(title: str = Query(min_length=1, max_length=200), artist: str = Query
     if youtube_error and not musicbrainz['candidates']:
         raise youtube_error  # Retry a failed provider, don't report an empty successful search.
     return musicbrainz
+
+
+@router.get('/api/identify/search')
+def search(title: str = Query(min_length=1, max_length=200), artist: str = Query(default='', max_length=200),
+           duration: float = Query(default=0, ge=0, le=86400)):
+    return best_result(search_sources(title, artist, duration), title, artist, duration)
 
 
 def recognize(content):

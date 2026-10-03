@@ -173,8 +173,19 @@
   }
 
   // ===== Navigation =====
+  WaveMobile.preventZoom(document);
+  const tabTap = WaveMobile.tabTap();
+  let scrollToTopView = null;
+  const scrollPageTop = () => $('.main-content').scrollTo({top:0,
+    behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
   navBtns.forEach(btn => {
     btn.addEventListener('click', () => {
+      if(tabTap(btn.dataset.view)) {
+        viewScrollPositions.set(btn.dataset.view,0);
+        if(btn.classList.contains('active')) scrollPageTop();
+        else scrollToTopView=btn.dataset.view;
+        return;
+      }
       if (btn.classList.contains('active')) return;
       const scroller = $('.main-content');
       WaveMotion.navigate(scroller, async () => {
@@ -192,7 +203,9 @@
         if (btn.dataset.view === 'library') await refreshLibraryView();
         if (btn.dataset.view === 'home') await refreshHomeView();
         if (btn.dataset.view === 'import') refreshImportView();
-        scroller.scrollTop = viewScrollPositions.get(btn.dataset.view) || 0;
+        if(scrollToTopView===btn.dataset.view) {
+          scroller.scrollTop=0;scrollToTopView=null;
+        } else scroller.scrollTop = viewScrollPositions.get(btn.dataset.view) || 0;
       });
     });
   });
@@ -250,9 +263,6 @@
       setTheme(document.documentElement.dataset.theme || 'dark');
     } else if (panel === 'languages') {
       WaveI18n.renderPicker(settingsPanelContent);
-    } else if (panel === 'identification') {
-      settingsPanelTitle.textContent = 'Identification des morceaux';
-      WaveIdentify.settings(settingsPanelContent);
     } else if (panel === 'legal') {
       for (const [label, href] of [['Confidentialité', './confidentialite.html'], ['Informations légales et conditions d’utilisation', './conditions.html']]) {
         const link = document.createElement('a'); link.className = 'settings-legal-link';
@@ -705,6 +715,7 @@
       btn.appendChild(span);
       btn.addEventListener('click', () => { closeOptionsSheet(); handler(); });
       optionsList.appendChild(btn);
+      return btn;
     };
 
     addItem('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>',
@@ -773,26 +784,15 @@
     }
 
     if (track.userImported) {
-      const state = track.identification;
-      const status = document.createElement('p'); status.className = 'language-note';
-      status.dataset.identificationStatus = '';
-      status.textContent = WaveIdentify.describe(track);
-      optionsList.appendChild(status);
-      for (const candidate of state?.candidates || []) {
-        addItem('', `Utiliser : ${candidate.artist} — ${candidate.title}`, '', async () => {
-          if (!await showConfirm(`Remplacer les informations par « ${candidate.title} » — ${candidate.artist} ?`)) return;
-          const updated=await DB.updateUserTrack(track.id,{title:candidate.title,artist:candidate.artist,metadataLocked:true,
-            originalMetadata:track.originalMetadata||{title:track.title,artist:track.artist},identification:{...state,status:'confirmed'}});
-          if(updated) await refreshIdentifiedTrack(updated);
-        });
-      }
-      addItem('', 'Rechercher les informations du morceau', '', async () => {
-        if(!WaveIdentify.isEnabled()) {showToast('Active l’identification dans les paramètres.');return;}
+      if(WaveIdentify.canIdentify(track)) {
+      const identifyButton=addItem('', 'Rechercher et corriger les informations', '', async () => {
         const snapshot={...track};
-        if(snapshot.metadataLocked && !await showConfirm('Autoriser une nouvelle identification de ce morceau ? Une correspondance fiable pourra remplacer tes corrections actuelles.')) return;
-        const queued=await WaveIdentify.retry(snapshot,!!snapshot.metadataLocked);
+        if(!await showConfirm('Rechercher ce morceau et remplacer automatiquement son titre et son artiste par le meilleur résultat fiable ? Tu pourras rétablir les informations d’origine.')) return;
+        const queued=await WaveIdentify.retry(snapshot,true);
         showToast(queued ? (navigator.onLine===false ? 'Recherche en attente de connexion' : 'Recherche demandée. Le résultat sera signalé ici.') : 'Le morceau a changé. Rouvre son menu pour réessayer.');
       });
+      identifyButton.dataset.identifyAction='true';
+      }
       if(track.originalMetadata) addItem('', 'Rétablir les informations d’origine', '', async () => {
         const updated=await DB.updateUserTrack(track.id,{...track.originalMetadata,metadataLocked:true,identification:{status:'restored'}});
         if(updated) await refreshIdentifiedTrack(updated);
@@ -895,7 +895,7 @@
     const title = $('#trackEditTitle').value.trim();
     const artist = $('#trackEditArtist').value.trim();
     if (!title || !artist) { showToast('Indique un titre et un artiste.'); return; }
-    const changes = { title, artist, coverArt:editedCover, metadataLocked:true,
+    const changes = { title, artist, coverArt:editedCover, metadataLocked:true,identification:{status:'edited'},
       originalMetadata:editingTrack.originalMetadata||{title:editingTrack.title,artist:editingTrack.artist} };
     try {
       await DB.updateUserTrack(editingTrack.id, changes);
@@ -2200,14 +2200,14 @@
       row.querySelector('.track-artist').textContent=updated.artist;
     }});
     if(optionsOverlay.dataset.context==='track' && optionsOverlay.dataset.trackId===String(updated.id)) {
-      const status=optionsList.querySelector('[data-identification-status]');
-      if(status) status.textContent=updated.identification?.status==='review'
-        ? 'Résultats trouvés. Rouvre ce menu pour choisir une proposition.' : WaveIdentify.describe(updated);
+      optionsTitle.textContent=updated.title;optionsArtist.textContent=updated.artist;
+      if(!WaveIdentify.canIdentify(updated)) optionsList.querySelectorAll('.options-item').forEach(button=>{
+        if(button.dataset.identifyAction==='true')button.remove();
+      });
     }
     if(resultArrived) showToast(updated.identification.status==='matched'
       ? `Identifié : ${updated.artist} — ${updated.title}`
-      : updated.identification.status==='review' ? 'Propositions trouvées : ouvre les ⋯ du morceau pour les confirmer.'
-      : 'Aucun résultat textuel trouvé. Le titre et l’artiste ont été conservés.');
+      : 'Aucune correspondance assez fiable. Le titre et l’artiste ont été conservés.');
   }
   syncYTAPIState();
   await loadUserTracks();

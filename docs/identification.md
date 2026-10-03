@@ -14,11 +14,11 @@ Le titre complet et l’artiste doivent concorder, avec une durée connue à tro
 secondes près. Si l’artiste est absent, le titre importé doit contenir le titre
 complet et le nom complet de l’artiste dans l’un ou l’autre ordre, par exemple
 `【MV】 九尾 9Lana`. Plusieurs identités admissibles, une durée absente, une autre
-version ou un simple titre sans artiste produisent des propositions à confirmer.
+version ou un simple titre sans artiste restent sans correction en l’absence de preuve suffisante.
 Ce sont des critères prudents, pas une garantie de reconnaissance parfaite.
 
 MusicBrainz reste un recours si YouTube Music ne donne pas de correspondance
-automatique ou rencontre une erreur. Les propositions trouvées sont conservées
+automatique ou rencontre une erreur. Les résultats internes sont conservés
 si l’autre fournisseur tombe en panne. Sans aucun résultat exploitable, une panne
 entraîne une nouvelle tentative. Les requêtes YouTube sont sérialisées et leurs
 connexions/lectures ont des délais limites. La bibliothèque non officielle
@@ -48,8 +48,10 @@ afficher hors ligne. Les fichiers audio eux-mêmes ne sont pas réécrits.
 MusicBrainz reçoit titre/artiste/durée via le serveur. L’application n’applique
 automatiquement une réponse textuelle que si titre et artiste concordent et que
 la durée diffère d’au plus 3 secondes. Ce seuil est une heuristique conservatrice,
-pas une garantie d’identité. Les résultats incertains sont proposés dans le menu
-du morceau. Les noms sont insérés comme texte, jamais comme HTML.
+pas une garantie d’identité. Une sélection finale compare aussi les titres
+bilingues explicites, les qualificatifs de version, l’artiste, la durée et
+l’écart avec le deuxième résultat. Un seul résultat suffisamment fiable est
+appliqué ; aucune liste n’est affichée. Les noms sont insérés comme texte.
 
 La file reprend à l’ouverture, au retour en ligne et au retour au premier plan.
 Les échecs réseau entraînent un délai croissant jusqu’à 24 h. Les recherches sont
@@ -66,13 +68,15 @@ le suffixe de chaîne ` - Topic` du champ artiste. Live, remix et cover restent
 présents. Après une recherche exacte infructueuse, une seconde requête limitée
 cherche les mots du titre dans les champs titre ou artiste. Par exemple,
 `【MV】 九尾 9Lana` peut retrouver `九尾` / `9Lana` sans inventer une séparation.
-Ce résultat élargi est proposé à confirmation : il ne suffit pas à justifier
-une correction automatique sans artiste initial fiable.
+Ce résultat élargi est évalué par la sélection finale. Un artiste absent doit
+être présent intégralement dans le titre importé pour une correction automatique.
 
-Le menu indique explicitement l’absence de résultat textuel. Une recherche
-manuelle signale sa fin par un message et les propositions restent dans le menu
-du morceau. Les morceaux protégés peuvent être relancés après confirmation
-explicite ; les informations d’origine sont conservées. Une modification faite
+Le menu contient « Rechercher et corriger les informations ». Une confirmation
+autorise la recherche puis la correction directe. Un message signale la fin ou
+l’absence de correspondance fiable. Les états internes et les propositions ne
+sont plus affichés dans le menu. L’action disparaît après succès et revient
+après restauration des originaux ou édition manuelle. Les informations d’origine
+sont conservées. Une modification faite
 entre l’ouverture de la confirmation et sa validation annule cette relance.
 
 ## Déploiement requis
@@ -98,9 +102,9 @@ traitement. AcoustID reçoit seulement l’empreinte et la durée totale. Une cl
 d’application est nécessaire. Aucun envoi d’empreinte à la base contributive.
 
 Pour les fichiers plus volumineux ou les formats incompatibles, seule la recherche
-textuelle est disponible. Les deux options sont désactivables dans les paramètres.
-Un transfert en cours peut finir même si une option est désactivée ; aucune nouvelle
-correction automatique n’est appliquée après désactivation générale.
+textuelle est disponible. La rubrique d’identification a été retirée des paramètres.
+Les anciennes préférences de désactivation restent respectées pour les recherches
+automatiques et l’audio. Une recherche manuelle explicitement confirmée reste possible.
 Safari ne permet pas de garantir le Wi-Fi exclusivement, et une PWA fermée n’exécute
 pas cette file en continu. Pas de prétention de fonctionnement en arrière-plan.
 
