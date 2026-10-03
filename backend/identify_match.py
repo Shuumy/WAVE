@@ -1,6 +1,45 @@
 """Pure match policy, tested without network or API credentials."""
 import re
 import unicodedata
+import math
+
+
+def classify_youtube(rows, title, artist, duration):
+    """Match structured music results, never treat a channel as an artist.
+
+    An unknown artist can be recovered automatically only when its full name
+    is already present beside the full song title in the imported title.
+    Equal duration alone or the first search result is insufficient.
+    """
+    title_key = normalize(clean_title(title))
+    artist_key = normalize(clean_artist(artist))
+    choices, eligible = {}, {}
+    for row in rows[:10]:
+        names = [a.get('name', '') for a in (row.get('artists') or []) if a.get('name')]
+        if not row.get('title') or not row.get('videoId') or not names:
+            continue
+        name = ', '.join(names)
+        try:
+            seconds = float(row.get('duration_seconds') or 0)
+        except (TypeError, ValueError):
+            seconds = 0
+        if not math.isfinite(seconds) or seconds < 0:
+            seconds = 0
+        item = candidate(row['title'], name, '', seconds)
+        item.update(source='YouTube Music', videoId=str(row['videoId'])[:100])
+        key = (normalize(item['title']), normalize(item['artist']))
+        choices.setdefault(key, item)
+        full_title = normalize(clean_title(item['title']))
+        full_artist = normalize(item['artist'])
+        combined = title_key in (normalize(item['title']+' '+name), normalize(name+' '+item['title']))
+        identity = ((title_key == full_title or combined) and artist_key == full_artist) if artist_key else combined
+        if (identity and row.get('resultType') == 'song' and row.get('videoType') == 'MUSIC_VIDEO_TYPE_ATV'
+                and duration > 0 and seconds > 0 and abs(seconds-duration) <= 3):
+            eligible[key] = item
+    match = next(iter(eligible.values())) if len(eligible) == 1 else None
+    ranked = list(eligible.values()) + [v for k,v in choices.items() if k not in eligible]
+    return {'source':'YouTube Music','status':'matched' if match else 'review' if ranked else 'unmatched',
+            'match':match,'candidates':ranked[:5]}
 
 
 def clean_title(value):

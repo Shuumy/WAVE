@@ -11,11 +11,12 @@ import urllib.request
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from starlette.concurrency import run_in_threadpool
-from identify_match import classify, classify_audio, clean_title, clean_artist, search_queries
+from identify_match import classify, classify_audio, classify_youtube, clean_title, clean_artist, search_queries
 
 router = APIRouter()
 gate = threading.Lock()
 audio_gate = threading.Lock()
+youtube_gate = threading.Lock()
 last_request = 0.0
 MAX_BYTES = 25 * 1024 * 1024
 USER_AGENT = 'WAVE/1.0 (https://github.com/Shuumy/WAVE; shuumy03@gmail.com)'
@@ -45,9 +46,7 @@ def capabilities():
     return {'text': True, 'audio': bool(os.getenv('ACOUSTID_API_KEY')), 'maxAudioBytes': MAX_BYTES}
 
 
-@router.get('/api/identify/search')
-def search(title: str = Query(min_length=1, max_length=200), artist: str = Query(default='', max_length=200),
-           duration: float = Query(default=0, ge=0, le=86400)):
+def search_musicbrainz(title, artist, duration):
     title, artist = clean_title(title), clean_artist(artist)
     if not title:
         return classify([], title, artist, duration)
@@ -65,6 +64,58 @@ def search(title: str = Query(min_length=1, max_length=200), artist: str = Query
         if result['status'] == 'matched':
             break
     return result
+
+
+def request_youtube(query):
+    # Separate session per lookup. No credentials, cookies from a user, or audio.
+    from requests import Session
+    from ytmusicapi import YTMusic
+    class TimedSession(Session):
+        def request(self, *args, **kwargs):
+            kwargs['timeout'] = (5, 12)
+            return super().request(*args, **kwargs)
+    if not youtube_gate.acquire(timeout=2):
+        raise HTTPException(503, 'Recherche YouTube Music occupée.')
+    try:
+        with TimedSession() as session:
+            return YTMusic(requests_session=session).search(query, filter='songs', limit=10, ignore_spelling=False)[:10]
+    except Exception:
+        raise HTTPException(503, 'YouTube Music ne répond pas pour le moment.') from None
+    finally:
+        youtube_gate.release()
+
+
+@router.get('/api/identify/search')
+def search(title: str = Query(min_length=1, max_length=200), artist: str = Query(default='', max_length=200),
+           duration: float = Query(default=0, ge=0, le=86400)):
+    title, artist = clean_title(title), clean_artist(artist)
+    if not title:
+        return classify([], title, artist, duration)
+    youtube_error = None
+    try:
+        youtube = classify_youtube(request_youtube(' '.join(x for x in [title, artist] if x)[:400]), title, artist, duration)
+    except HTTPException as error:
+        youtube_error = error
+        youtube = classify_youtube([], title, artist, duration)
+    if youtube['status'] == 'matched':
+        return youtube
+    try:
+        musicbrainz = search_musicbrainz(title, artist, duration)
+    except HTTPException:
+        if youtube['candidates']:
+            return youtube
+        raise
+    if musicbrainz['status'] == 'matched':
+        return musicbrainz
+    if youtube['candidates']:
+        for item in musicbrainz['candidates']:
+            if not any(c['title'] == item['title'] and c['artist'] == item['artist'] for c in youtube['candidates']):
+                youtube['candidates'].append({**item,'source':'MusicBrainz'})
+        youtube['candidates'] = youtube['candidates'][:5]
+        return youtube
+    if youtube_error and not musicbrainz['candidates']:
+        raise youtube_error  # Retry a failed provider, don't report an empty successful search.
+    return musicbrainz
 
 
 def recognize(content):
