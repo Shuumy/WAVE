@@ -2,6 +2,36 @@
 
 ## Fonctionnement
 
+### Recherche YouTube Music
+
+À chaque identification, le serveur reprend le titre et l’artiste disponibles
+et recherche jusqu’à dix morceaux sur YouTube Music, sans compte utilisateur ni
+clé AcoustID. Il utilise les artistes structurés du catalogue, jamais le nom
+d’une chaîne comme substitut. Seules les pistes audio de catalogue (`song`,
+`MUSIC_VIDEO_TYPE_ATV`) sont admissibles à une correction automatique.
+
+Le titre complet et l’artiste doivent concorder, avec une durée connue à trois
+secondes près. Si l’artiste est absent, le titre importé doit contenir le titre
+complet et le nom complet de l’artiste dans l’un ou l’autre ordre, par exemple
+`【MV】 九尾 9Lana`. Plusieurs identités admissibles, une durée absente, une autre
+version ou un simple titre sans artiste produisent des propositions à confirmer.
+Ce sont des critères prudents, pas une garantie de reconnaissance parfaite.
+
+MusicBrainz reste un recours si YouTube Music ne donne pas de correspondance
+automatique ou rencontre une erreur. Les propositions trouvées sont conservées
+si l’autre fournisseur tombe en panne. Sans aucun résultat exploitable, une panne
+entraîne une nouvelle tentative. Les requêtes YouTube sont sérialisées et leurs
+connexions/lectures ont des délais limites. La bibliothèque non officielle
+ytmusicapi peut cesser de fonctionner si YouTube change son service.
+
+Les corrections utilisent la sauvegarde transactionnelle locale existante ; les
+informations d’origine, les corrections manuelles et l’écoute sont préservées.
+Les anciens morceaux se relancent depuis leur menu ⋯. Aucun envoi massif des
+anciens imports n’est déclenché par cette mise à jour.
+
+Après fusion, redéployer Render pour activer ce fournisseur et attendre la mise à
+jour GitHub Pages. Aucun nouveau secret ni téléchargement audio n’est nécessaire.
+
 Les nouveaux imports conservent leurs informations d’origine et une tâche locale
 d’identification. Les anciens morceaux ne sont pas envoyés en masse : leur menu
 permet de demander une recherche. Les métadonnées intégrées sont lues en priorité,

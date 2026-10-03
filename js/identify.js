@@ -118,7 +118,7 @@ const WaveIdentify = (() => {
       });row.append(text,input);host.append(row);
     }
     const note=document.createElement('p');note.className='language-note';
-    note.textContent='En ligne, le titre, l’artiste et la durée sont recherchés via WAVE et MusicBrainz. Si nécessaire et si le service audio est configuré, un fichier de 25 Mo maximum est envoyé temporairement à WAVE pour calculer son empreinte, transmise à AcoustID. Les corrections restent sur cet appareil. Safari ne permet pas de garantir une connexion Wi-Fi uniquement.';
+    note.textContent='En ligne, WAVE recherche le titre et l’artiste sur YouTube Music, puis sur MusicBrainz si nécessaire, et compare la durée. Une correspondance fiable est enregistrée automatiquement ; sinon, les propositions sont disponibles dans le menu du morceau. Si nécessaire et si le service audio est configuré, un fichier de 25 Mo maximum est envoyé temporairement à WAVE pour calculer son empreinte, transmise à AcoustID. Les corrections restent sur cet appareil. Safari ne permet pas de garantir une connexion Wi-Fi uniquement.';
     host.append(note);
   }
   async function init(database,base,callback,reader) {
