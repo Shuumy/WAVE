@@ -51,3 +51,22 @@ test('manual searches persist a result notification marker and expose honest no-
   f.track.identification.status='unavailable';
   assert.match(f.api.describe(f.track),/Aucun résultat textuel/);
 });
+test('explicit audio consent enables a manual attempt despite an old disabled preference',async()=>{
+  const f=fixture();f.track.identification.manual=true;f.track.identification.audioConsent=true;
+  f.db.getUserAudioBlob=async()=>({size:100});
+  f.context.fetch=async(url,options)=>{
+    f.calls.push(url);
+    return {ok:true,json:async()=>url.includes('/capabilities')?{audio:true,maxAudioBytes:26214400}
+      :url.includes('/audio?')?{status:'matched',source:'AcoustID',match:{title:'Song',artist:'Recovered artist'}}
+      :{status:'unmatched',candidates:[]}};
+  };
+  await f.run();assert.ok(f.calls.some(url=>url.includes('/audio?')));
+  assert.equal(f.track.artist,'Recovered artist');assert.equal(f.track.identification.source,'AcoustID');
+});
+test('missing audio file is reported separately from an unsuccessful fingerprint',async()=>{
+  const f=fixture();f.track.identification.manual=true;f.track.identification.audioConsent=true;
+  f.db.getUserAudioBlob=async()=>null;
+  f.context.fetch=async url=>({ok:true,json:async()=>url.includes('/capabilities')?{audio:true,maxAudioBytes:26214400}:{status:'unmatched'}});
+  await f.run();assert.equal(f.track.identification.reason,'audio-file-missing');
+  assert.match(f.api.resultMessage(f.track),/introuvable/);
+});

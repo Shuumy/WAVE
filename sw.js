@@ -1,5 +1,5 @@
 // WAVE service worker — fichiers de l'application disponibles hors ligne.
-const CACHE_NAME = 'wave-v38';
+const CACHE_NAME = 'wave-v39';
 const ASSETS = [
   './js/mobile-interactions.js',
   './js/identify.js',

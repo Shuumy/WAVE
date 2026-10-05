@@ -57,6 +57,15 @@ class SearchTests(unittest.TestCase):
         other.assert_not_called()
         self.youtube.assert_called_once_with('九尾 9Lana')
 
+    def test_uploaded_devilman_title_without_artist_matches_catalogue(self):
+        self.youtube.return_value=[{'title':'Devilman No Uta','artists':[{'name':'kensuke ushio'}],
+          'duration_seconds':186,'videoId':'BLXq9D0RuGw','resultType':'song','videoType':'MUSIC_VIDEO_TYPE_ATV'}]
+        with patch('identify.request_json') as other:
+            result=public_search('Devilman No Uta','',185.573875)
+        self.assertEqual(result['match']['artist'],'kensuke ushio')
+        self.assertEqual(result['candidates'],[])
+        other.assert_not_called()
+
     def test_youtube_outage_falls_back_to_musicbrainz(self):
         self.youtube.side_effect=HTTPException(503)
         row={'title':'Song','artist-credit':[{'name':'Artist'}],'length':200000}

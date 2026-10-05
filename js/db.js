@@ -98,13 +98,13 @@ const DB = (() => {
     });
   }
 
-  function queueIdentification(snapshot, unlock = false) {
+  function queueIdentification(snapshot, unlock = false, audioConsent = false) {
     return mutateTrack(snapshot.id, track => {
       if (['matched','confirmed'].includes(track.identification?.status)) return null;
       if (track.title !== snapshot.title || track.artist !== snapshot.artist || (track.metadataLocked && !unlock)) return null;
       return {...track,metadataLocked:false,
         originalMetadata:track.originalMetadata || {title:track.title,artist:track.artist},
-        identification:{status:'pending',attempts:0,nextAttempt:0,manual:true}};
+        identification:{status:'pending',attempts:0,nextAttempt:0,manual:true,audioConsent}};
     });
   }
 
