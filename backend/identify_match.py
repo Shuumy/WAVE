@@ -58,13 +58,13 @@ def best_result(result, title, artist, duration):
 def classify_youtube(rows, title, artist, duration):
     """Match structured music results, never treat a channel as an artist.
 
-    An unknown artist can be recovered automatically only when its full name
-    is already present beside the full song title in the imported title.
+    An unknown artist can be recovered from a unique exact title/duration
+    match to a catalogue audio track, or from a combined title/artist string.
     Equal duration alone or the first search result is insufficient.
     """
     title_key = normalize(clean_title(title))
     artist_key = normalize(clean_artist(artist))
-    choices, eligible = {}, {}
+    choices, eligible, competitors = {}, {}, set()
     for row in rows[:10]:
         names = [a.get('name', '') for a in (row.get('artists') or []) if a.get('name')]
         if not row.get('title') or not row.get('videoId') or not names:
@@ -83,11 +83,13 @@ def classify_youtube(rows, title, artist, duration):
         full_title = normalize(clean_title(item['title']))
         full_artist = normalize(item['artist'])
         combined = title_key in (normalize(item['title']+' '+name), normalize(name+' '+item['title']))
-        identity = ((title_key == full_title or combined) and artist_key == full_artist) if artist_key else combined
+        identity = ((title_key == full_title or combined) and artist_key == full_artist) if artist_key else (combined or title_key == full_title)
+        if identity and duration > 0 and seconds > 0 and abs(seconds-duration) <= 3:
+            competitors.add(key)
         if (identity and row.get('resultType') == 'song' and row.get('videoType') == 'MUSIC_VIDEO_TYPE_ATV'
                 and duration > 0 and seconds > 0 and abs(seconds-duration) <= 3):
             eligible[key] = item
-    match = next(iter(eligible.values())) if len(eligible) == 1 else None
+    match = next(iter(eligible.values())) if len(eligible) == 1 and len(competitors) == 1 else None
     ranked = list(eligible.values()) + [v for k,v in choices.items() if k not in eligible]
     return {'source':'YouTube Music','status':'matched' if match else 'review' if ranked else 'unmatched',
             'match':match,'candidates':ranked[:5]}

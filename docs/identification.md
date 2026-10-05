@@ -11,10 +11,12 @@ d’une chaîne comme substitut. Seules les pistes audio de catalogue (`song`,
 `MUSIC_VIDEO_TYPE_ATV`) sont admissibles à une correction automatique.
 
 Le titre complet et l’artiste doivent concorder, avec une durée connue à trois
-secondes près. Si l’artiste est absent, le titre importé doit contenir le titre
-complet et le nom complet de l’artiste dans l’un ou l’autre ordre, par exemple
-`【MV】 九尾 9Lana`. Plusieurs identités admissibles, une durée absente, une autre
-version ou un simple titre sans artiste restent sans correction en l’absence de preuve suffisante.
+secondes près. Si l’artiste est absent, un titre exact et une durée concordante
+peuvent identifier une piste de catalogue unique. Une autre identité de même
+titre et durée, même issue d’une vidéo, empêche cette correction automatique.
+Un titre combinant titre et artiste reste aussi accepté, par exemple
+`【MV】 九尾 9Lana`. Plusieurs identités admissibles, une durée absente ou une autre
+version restent sans correction en l’absence de preuve suffisante.
 Ce sont des critères prudents, pas une garantie de reconnaissance parfaite.
 
 MusicBrainz reste un recours si YouTube Music ne donne pas de correspondance
@@ -68,8 +70,9 @@ le suffixe de chaîne ` - Topic` du champ artiste. Live, remix et cover restent
 présents. Après une recherche exacte infructueuse, une seconde requête limitée
 cherche les mots du titre dans les champs titre ou artiste. Par exemple,
 `【MV】 九尾 9Lana` peut retrouver `九尾` / `9Lana` sans inventer une séparation.
-Ce résultat élargi est évalué par la sélection finale. Un artiste absent doit
-être présent intégralement dans le titre importé pour une correction automatique.
+Ce résultat élargi MusicBrainz est évalué par la sélection finale. Hors piste de
+catalogue YouTube exacte et unique, un artiste absent doit être présent
+intégralement dans le titre importé pour une correction automatique.
 
 Le menu contient « Rechercher et corriger les informations ». Une confirmation
 autorise la recherche puis la correction directe. Un message signale la fin ou
@@ -104,7 +107,12 @@ d’application est nécessaire. Aucun envoi d’empreinte à la base contributi
 Pour les fichiers plus volumineux ou les formats incompatibles, seule la recherche
 textuelle est disponible. La rubrique d’identification a été retirée des paramètres.
 Les anciennes préférences de désactivation restent respectées pour les recherches
-automatiques et l’audio. Une recherche manuelle explicitement confirmée reste possible.
+automatiques. Une nouvelle confirmation manuelle mentionne explicitement l’envoi
+du fichier pour reconnaissance (25 Mo maximum) et autorise cet essai audio pour
+cette demande, même si une ancienne préférence le désactivait. Les anciennes
+demandes déjà en attente ne reçoivent pas rétroactivement ce consentement.
+Les messages distinguent fichier absent, durée inconnue, limite de taille,
+format non analysable, service non configuré et absence de correspondance fiable.
 Safari ne permet pas de garantir le Wi-Fi exclusivement, et une PWA fermée n’exécute
 pas cette file en continu. Pas de prétention de fonctionnement en arrière-plan.
 
@@ -117,3 +125,9 @@ pas cette file en continu. Pas de prétention de fonctionnement en arrière-plan
 
 Les tests simulent les fournisseurs. La reconnaissance réelle de fichiers de
 l’utilisateur nécessite la clé, le déploiement et une vérification sur iPhone.
+
+Vérification du 5 octobre 2026 : le MP3 fourni par l’utilisateur (185,573875 s,
+4 453 817 octets) a reçu HTTP 200 et `matched` sur la route audio Render.
+AcoustID crédite « アヴちゃん(女王蜂) », tandis que YouTube Music crédite
+« kensuke ushio » pour « Devilman No Uta ». Ces différences de crédits ne sont
+pas fusionnées arbitrairement. Aucun fichier audio ni secret n’est versionné.

@@ -32,8 +32,17 @@ class YouTubeTests(unittest.TestCase):
         row=song(); row.pop('artists');row['author']='9Lana'
         self.assertEqual(classify_youtube([row],'九尾 9Lana','',241)['status'],'unmatched')
 
-    def test_unknown_artist_title_alone_stays_a_proposal(self):
-        self.assertEqual(classify_youtube([song()], '九尾','',241)['status'],'review')
+    def test_unknown_artist_with_unique_exact_title_and_duration_matches(self):
+        self.assertEqual(classify_youtube([song()], '九尾','',241)['status'],'matched')
+        row=song('Devilman No Uta','kensuke ushio',186)
+        result=classify_youtube([row,row,song('Devilman Crybaby','Caleb Hyles',186)],'Devilman No Uta','',185.573875)
+        self.assertEqual(result['match']['artist'],'kensuke ushio')
+
+    def test_unknown_artist_is_not_guessed_between_same_title_covers(self):
+        rows=[song(),song(artist='Other artist')]
+        self.assertEqual(classify_youtube(rows,'九尾','',241)['status'],'review')
+        rows[1]['videoType']='MUSIC_VIDEO_TYPE_OMV'
+        self.assertEqual(classify_youtube(rows,'九尾','',241)['status'],'review')
 
     def test_missing_duration_and_unverified_video_stay_proposals(self):
         for seconds in [None,0,'invalid',float('nan'),float('inf')]:
@@ -49,4 +58,3 @@ class YouTubeTests(unittest.TestCase):
     def test_two_valid_splits_are_ambiguous(self):
         result=classify_youtube([song('B C','A'),song('C','A B')],'A B C','',241)
         self.assertEqual(result['status'],'review')
-

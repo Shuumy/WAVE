@@ -129,24 +129,31 @@
   let repeatMode = 'none';
 
   // ===== Confirm Dialog =====
-  function showConfirm(message) {
+  let cancelConfirmation = null;
+  function showConfirm(message, {label='Supprimer', destructive=true} = {}) {
+    cancelConfirmation?.();
     return new Promise((resolve) => {
       // Utilise textContent pour éviter toute injection dans le message de confirmation
       confirmMessage.textContent = message;
+      confirmYes.textContent = label;
+      confirmYes.classList.toggle('confirm-action',!destructive);
       WaveMotion.open(confirmModal);
       const cleanup = (result) => {
         WaveMotion.close(confirmModal);
         confirmYes.onclick = null;
         confirmNo.onclick  = null;
+        cancelConfirmation = null;
         resolve(result);
       };
       confirmYes.onclick = () => cleanup(true);
       confirmNo.onclick  = () => cleanup(false);
+      cancelConfirmation = () => cleanup(false);
     });
   }
   confirmModal.addEventListener('click', (e) => {
-    if (e.target === confirmModal) { WaveMotion.close(confirmModal); }
+    if (e.target === confirmModal) cancelConfirmation?.();
   });
+  confirmModal.addEventListener('keydown',e=>{if(e.key==='Escape')cancelConfirmation?.();});
 
   function formatTotalDuration(s) {
     if (!s || s <= 0) return '0 min';
@@ -787,8 +794,8 @@
       if(WaveIdentify.canIdentify(track)) {
       const identifyButton=addItem('', 'Rechercher et corriger les informations', '', async () => {
         const snapshot={...track};
-        if(!await showConfirm('Rechercher ce morceau et remplacer automatiquement son titre et son artiste par le meilleur résultat fiable ? Tu pourras rétablir les informations d’origine.')) return;
-        const queued=await WaveIdentify.retry(snapshot,true);
+        if(!await showConfirm('Rechercher ce morceau et corriger son titre et son artiste ? Si nécessaire, le fichier (25 Mo maximum) sera envoyé au serveur pour reconnaissance audio. Tu pourras rétablir les informations d’origine.',{label:'Confirmer la correction',destructive:false})) return;
+        const queued=await WaveIdentify.retry(snapshot,true,true);
         showToast(queued ? (navigator.onLine===false ? 'Recherche en attente de connexion' : 'Recherche demandée. Le résultat sera signalé ici.') : 'Le morceau a changé. Rouvre son menu pour réessayer.');
       });
       identifyButton.dataset.identifyAction='true';
@@ -2205,9 +2212,7 @@
         if(button.dataset.identifyAction==='true')button.remove();
       });
     }
-    if(resultArrived) showToast(updated.identification.status==='matched'
-      ? `Identifié : ${updated.artist} — ${updated.title}`
-      : 'Aucune correspondance assez fiable. Le titre et l’artiste ont été conservés.');
+    if(resultArrived) showToast(WaveIdentify.resultMessage(updated));
   }
   syncYTAPIState();
   await loadUserTracks();

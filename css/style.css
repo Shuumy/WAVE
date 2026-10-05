@@ -519,6 +519,8 @@ html.ios-standalone, html.ios-standalone body, html.ios-standalone #app { height
   transition:all var(--transition);
 }
 .confirm-yes:hover { background:#e02020; }
+.confirm-yes.confirm-action { background:var(--accent); color:#111; }
+.confirm-yes.confirm-action:hover { background:var(--accent); filter:brightness(.92); }
 
 /* ===== Modals ===== */
 .modal-overlay {

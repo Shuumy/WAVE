@@ -38,22 +38,23 @@ const WaveIdentify = (() => {
     if(!available()) return;
     const query=new URLSearchParams({title:clean(track.title).slice(0,200),artist:track.artist==='Artiste inconnu'?'':clean(track.artist).slice(0,200),duration:String(track.duration||0)});
     let result=await request('/api/identify/search?'+query);
-    let audioUnavailable=false, tooLarge=false;
-    if(result.status!=='matched' && preferences.audio && navigator.onLine!==false && !document.hidden) {
+    let audioReason=null;
+    const allowAudio=preferences.audio || track.identification?.audioConsent===true;
+    if(result.status!=='matched' && allowAudio && navigator.onLine!==false && !document.hidden) {
       const capabilities=await request('/api/identify/capabilities');
       if(capabilities.audio) {
         const blob=await db.getUserAudioBlob(track.id);
-        if(blob && blob.size<=Math.min(capabilities.maxAudioBytes,25*1024*1024) && track.duration>0 && preferences.audio && available()) {
+        if(blob && blob.size<=Math.min(capabilities.maxAudioBytes,25*1024*1024) && track.duration>0 && allowAudio && available()) {
           try {
             const audioResult=await request('/api/identify/audio?duration='+encodeURIComponent(track.duration),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:blob});
             if(audioResult.status==='matched' || audioResult.candidates?.length) result=audioResult;
-          } catch(error) {if(![400,413,422].includes(error.status))throw error;tooLarge=true;}
-        } else tooLarge=true;
-      } else audioUnavailable=true;
-    }
+          } catch(error) {if(![400,413,422].includes(error.status))throw error;audioReason=error.status===413?'audio-size-limit':'audio-format-unsupported';}
+        } else audioReason=!blob?'audio-file-missing':!(track.duration>0)?'audio-duration-missing':'audio-size-limit';
+      } else audioReason='audio-not-configured';
+    } else if(result.status!=='matched' && !allowAudio) audioReason='audio-disabled';
     const match=result.status==='matched' && validMatch(result.match)?result.match:null;
-    const identification={status:match?'matched':audioUnavailable?'unavailable':'unmatched',
-      source:result.source,candidates:[],checkedAt:Date.now(),reason:audioUnavailable?'audio-not-configured':tooLarge?'audio-size-limit':null,
+    const identification={status:match?'matched':audioReason && audioReason!=='audio-disabled'?'unavailable':'unmatched',
+      source:result.source,candidates:[],checkedAt:Date.now(),reason:audioReason,
       attempts:(track.identification?.attempts||0)+1,manual:!!track.identification?.manual};
     if(!preferences.enabled && !track.identification?.manual) return;
     const updated=await db.saveIdentification(track,identification,match);
@@ -85,9 +86,9 @@ const WaveIdentify = (() => {
     } finally {busy=false;wake(60000);}
   }
   function wake(delay=0) {clearTimeout(timer);timer=setTimeout(()=>run().catch(()=>wake(60000)),delay);}
-  async function retry(track, unlock=false) {
+  async function retry(track, unlock=false, audioConsent=false) {
     if(!canIdentify(track) || (track.metadataLocked && !unlock)) return false;
-    const updated=await db.queueIdentification(track,unlock);
+    const updated=await db.queueIdentification(track,unlock,audioConsent);
     if(updated) {await onUpdate(updated);wake();}return !!updated;
   }
   function describe(track) {
@@ -112,5 +113,15 @@ const WaveIdentify = (() => {
     document.addEventListener('visibilitychange',()=>{if(!document.hidden)wake();});wake();
   }
   function canIdentify(track) { return !['matched','confirmed'].includes(track.identification?.status); }
-  return {name,clean,initial,init,wake,retry,validMatch,describe,canIdentify};
+  function resultMessage(track) {
+    if(track.identification?.status==='matched')return `Identifié : ${track.artist} — ${track.title}`;
+    return ({'audio-disabled':'Aucun résultat textuel fiable. L’analyse audio est désactivée.',
+      'audio-file-missing':'Le fichier audio est introuvable sur cet appareil. Réimporte-le pour l’analyser.',
+      'audio-duration-missing':'La durée du fichier est inconnue : l’analyse audio n’a pas pu démarrer.',
+      'audio-size-limit':'Aucun résultat textuel fiable. Le fichier dépasse la limite d’analyse audio de 25 Mo.',
+      'audio-format-unsupported':'Le serveur n’a pas pu analyser ce format audio.',
+      'audio-not-configured':'Aucun résultat textuel fiable. La reconnaissance audio n’est pas activée sur le serveur.'}[track.identification?.reason]
+      || 'Aucune correspondance assez fiable. Le titre et l’artiste ont été conservés.');
+  }
+  return {name,clean,initial,init,wake,retry,validMatch,describe,canIdentify,resultMessage};
 })();
