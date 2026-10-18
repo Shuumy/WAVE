@@ -5,6 +5,8 @@ import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 import json
+import logging
+from importlib.metadata import version, PackageNotFoundError
 import os
 from pathlib import Path
 import re
@@ -26,7 +28,59 @@ TTL = 1200
 MAX_BYTES = 100 * 1024 * 1024
 MAX_JOBS = 4  # Includes completed files: bounds temporary disk consumption.
 JOB_TIMEOUT = 240
+logger = logging.getLogger("uvicorn.error")
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+
+
+class AudioProcessError(RuntimeError):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def process_error(stderr: str, stage: str) -> AudioProcessError:
+    text = stderr.lower()
+    if stage == "ffmpeg":
+        return AudioProcessError("conversion_failed", "La conversion audio a échoué.")
+    if "sign in to confirm" in text or "not a bot" in text:
+        return AudioProcessError("youtube_verification_required", "YouTube demande une vérification à ce serveur. La récupération est indisponible depuis cet hébergement.")
+    if "private video" in text or "members-only" in text or "age-restricted" in text:
+        return AudioProcessError("restricted_video", "Cette vidéo nécessite un accès ou une authentification et ne peut pas être importée.")
+    if "po token" in text or "pot provider" in text or "getpot" in text:
+        code, message = "token_provider_failed", "Le fournisseur de jetons YouTube n’a pas pu préparer cette vidéo."
+    elif "requested format" in text:
+        code, message = "audio_format_unavailable", "YouTube ne propose aucune piste audio compatible pour cette vidéo."
+    elif "403" in text:
+        code, message = "upstream_forbidden", "YouTube refuse l’accès au fichier audio depuis ce serveur (403)."
+    elif "429" in text or "too many requests" in text:
+        code, message = "upstream_rate_limited", "YouTube limite temporairement les requêtes de ce serveur. Réessaie plus tard."
+    elif "timed out" in text or "certificate_verify_failed" in text or "unable to download" in text:
+        code, message = "upstream_network_error", "La connexion du serveur à YouTube a échoué."
+    elif "video unavailable" in text or "content isn’t available" in text or "content isn't available" in text:
+        code, message = "video_unavailable", "YouTube indique que cette vidéo n’est pas disponible depuis ce serveur."
+    else:
+        code, message = "extraction_failed", "La récupération audio a échoué. Le diagnostic a été enregistré sur le serveur."
+    return AudioProcessError(code, message)
+
+
+def safe_diagnostic(text: str) -> str:
+    # Never log signed media URLs, cookies, tokens or arbitrary long identifiers.
+    text = re.sub(r"https?://[^\s]+", "[url]", text)
+    text = re.sub(r"(?i)(cookie|authorization|po[_ -]?token|visitor[_ -]?data)[^\n]*", "[credential redacted]", text)
+    text = re.sub(r"[A-Za-z0-9_+/=-]{40,}", "[identifier]", text)
+    text = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", text)
+    return text[-2000:]
+
+
+def audio_engine_status() -> dict:
+    try:
+        plugin = version("bgutil-ytdlp-pot-provider")
+    except PackageNotFoundError:
+        plugin = "missing"
+    home = os.getenv("WAVE_POT_SERVER_HOME", "/opt/bgutil")
+    return {"provider": "bgutil-script", "providerVersion": plugin,
+            "providerInstalled": Path(home, "build/generate_once.js").is_file(),
+            "nodeInstalled": bool(shutil.which("node")), "ffmpegInstalled": bool(shutil.which("ffmpeg"))}
 
 
 def youtube_id(url: str) -> str:
@@ -71,6 +125,7 @@ class Job:
     artist: str = ""
     expires: float = 0
     task: asyncio.Task | None = None
+    error_code: str | None = None
 
 
 jobs: dict[str, Job] = {}
@@ -105,9 +160,15 @@ def get_job(token: str) -> Job:
 async def run_process(args: list[str], directory: Path, timeout: int = JOB_TIMEOUT):
     """No shell; kill the entire process group (including FFmpeg) on failure."""
     process = await asyncio.create_subprocess_exec(
-        *args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        *args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
         cwd=directory, start_new_session=True,
     )
+    tail = bytearray()
+    async def read_stderr():
+        while chunk := await process.stderr.read(4096):
+            tail.extend(chunk)
+            del tail[:-16384]
+    reader = asyncio.create_task(read_stderr())
     try:
         async with asyncio.timeout(timeout):
             while process.returncode is None:
@@ -117,8 +178,13 @@ async def run_process(args: list[str], directory: Path, timeout: int = JOB_TIMEO
                     pass
                 if sum(p.stat().st_size for p in directory.iterdir() if p.is_file()) > 2 * MAX_BYTES:
                     raise RuntimeError("Le média dépasse la limite de taille autorisée.")
+        await reader
         if process.returncode:
-            raise RuntimeError("Impossible de récupérer cette vidéo. Elle peut être privée, indisponible ou refusée par YouTube depuis ce serveur.")
+            detail = tail.decode("utf-8", errors="replace")
+            stage = "ffmpeg" if args[0] == "ffmpeg" else "extractor"
+            error = process_error(detail, stage)
+            logger.warning("Audio import stage=%s code=%s exit=%s diagnostic=%s", stage, error.code, process.returncode, safe_diagnostic(detail))
+            raise error
     finally:
         if process.returncode is None:
             try:
@@ -126,6 +192,8 @@ async def run_process(args: list[str], directory: Path, timeout: int = JOB_TIMEO
             except ProcessLookupError:
                 pass
             await process.wait()
+        reader.cancel()
+        await asyncio.gather(reader, return_exceptions=True)
 
 
 async def process_job(job: Job):
@@ -134,8 +202,10 @@ async def process_job(job: Job):
             job.state, job.message = "extracting", "Récupération de la piste audio…"
             # Canonical URL only: never pass arbitrary user URLs to the extractor.
             await run_process([
-                sys.executable, "-m", "yt_dlp", "--ignore-config", "--no-plugin-dirs",
-                "--no-playlist", "--no-progress", "--quiet", "--no-warnings",
+                sys.executable, "-m", "yt_dlp", "--ignore-config",
+                "--no-playlist", "--no-progress", "--quiet",
+                "--extractor-args", "youtube:player_client=mweb,default",
+                "--extractor-args", "youtubepot-bgutilscript:server_home=" + os.getenv("WAVE_POT_SERVER_HOME", "/opt/bgutil"),
                 "--js-runtimes", "node", "--socket-timeout", "15", "--retries", "1",
                 "--fragment-retries", "1", "--extractor-retries", "1", "--max-filesize", str(MAX_BYTES),
                 "--match-filters", "!is_live & duration <= 1800", "--write-info-json",
@@ -169,6 +239,7 @@ async def process_job(job: Job):
         raise
     except Exception as exc:
         job.state = "failed"
+        job.error_code = getattr(exc, "code", "processing_timeout" if isinstance(exc, TimeoutError) else "processing_failed")
         job.message = str(exc) if isinstance(exc, RuntimeError) else "Le traitement a échoué ou dépassé le délai. Réessaie avec une vidéo plus courte."
         shutil.rmtree(job.directory, ignore_errors=True)
     finally:
@@ -222,7 +293,7 @@ async def import_status(token: str):
     job = get_job(token)
     return {"id": job.token, "state": job.state, "message": job.message,
             "title": job.title, "artist": job.artist, "videoId": job.video_id,
-            "format": job.format, "expiresAt": job.expires or None}
+            "format": job.format, "expiresAt": job.expires or None, "errorCode": job.error_code}
 
 
 @router.get("/{token}/file")

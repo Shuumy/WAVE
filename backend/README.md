@@ -127,3 +127,21 @@ FFprobe, le cycle de travail HTTP, les formats et le nettoyage sont réels. Ils 
 prouvent pas que YouTube autorise l'IP de production. Avant activation, convertir
 une courte vidéo publique autorisée sur l'hébergement réel, écouter le résultat,
 vérifier l'ajout à la bibliothèque puis le téléchargement MP3 et M4A.
+
+### Diagnostic et fournisseur de jetons
+
+Le conteneur inclut le plugin Python et le générateur JavaScript bgutil **2.0.2**,
+avec Node fourni par l'image versionnée du projet. Le générateur est lancé à la
+demande (un seul travail à la fois) : aucun port supplémentaire n'est exposé.
+Le chemin peut être configuré avec `WAVE_POT_SERVER_HOME` (défaut `/opt/bgutil`).
+Les clients `mweb,default` sont sélectionnés et le chargement des plugins est actif.
+Le build vérifie le chargement du générateur et du plugin. `/api/health` expose
+leur disponibilité, sans jetons. La présence du fournisseur ne garantit pas que
+YouTube accepte l'hébergement.
+
+Les erreurs ont désormais un `errorCode` (vérification demandée par YouTube,
+403, 429, problème réseau, fournisseur, format, conversion). Les journaux gardent
+au maximum 2 000 caractères d'un tampon d'erreur borné à 16 Kio ; URL, cookies,
+jetons et longs identifiants sont masqués. Aucun mode verbose ni cookie de compte
+n'est utilisé. Une vérification YouTube obligatoire est signalée explicitement,
+sans répétition automatique ni changement de réseau pour la contourner.

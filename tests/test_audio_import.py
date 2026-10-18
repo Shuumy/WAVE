@@ -123,3 +123,31 @@ def test_release_cancels_active_job(client, monkeypatch):
     assert client.delete(f'/api/imports/{token}').status_code == 204
     assert client.get(f'/api/imports/{token}').status_code == 404
     assert not directory.exists()
+
+
+@pytest.mark.parametrize('stderr,code', [
+    ("Sign in to confirm you're not a bot", 'youtube_verification_required'),
+    ('HTTP Error 403: Forbidden', 'upstream_forbidden'),
+    ('HTTP Error 429', 'upstream_rate_limited'),
+    ('Requested format is not available', 'audio_format_unavailable'),
+    ('PO Token provider failed', 'token_provider_failed'),
+    ('Read timed out', 'upstream_network_error'),
+    ('Private video', 'restricted_video'),
+])
+def test_diagnostic_categories(stderr, code):
+    assert audio.process_error(stderr, 'extractor').code == code
+
+
+def test_redact_diagnostic():
+    value = audio.safe_diagnostic('ERROR https://example.com/file?secret=abc\nCookie: secret\npo_token=secret\n' + 'A' * 60)
+    assert 'secret' not in value
+    assert 'example.com' not in value
+    assert 'A' * 60 not in value
+
+
+def test_stderr_is_drained_bounded_and_classified(tmp_path):
+    # Exceed the pipe buffer to catch deadlocks while keeping the tail bounded.
+    command = [sys.executable, '-c', "import sys; sys.stderr.write('x'*200000 + '\\nHTTP Error 403: Forbidden'); sys.exit(1)"]
+    with pytest.raises(audio.AudioProcessError) as exc:
+        asyncio.run(audio.run_process(command, tmp_path, timeout=5))
+    assert exc.value.code == 'upstream_forbidden'
