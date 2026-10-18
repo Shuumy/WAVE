@@ -1,7 +1,6 @@
-"""Backend WAVE : recherche YouTube Music uniquement.
+"""WAVE: search, identification and optional ephemeral audio imports.
 
-Les téléchargements ne transitent plus par Render. Ils sont effectués localement
-sur le Samsung par le pont Termux fourni dans ``android/wave_bridge.py``.
+The existing Samsung download bridge remains independent.
 """
 
 from __future__ import annotations
@@ -14,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from ytmusicapi import YTMusic
 from identify import router as identify_router
+from audio_import import router as audio_import_router, lifespan as audio_lifespan, enabled as audio_enabled
 
 APP_VERSION = "2.0.0"
 DEFAULT_FRONTEND_ORIGINS = (
@@ -31,20 +31,22 @@ def allowed_origins() -> list[str]:
 
 app = FastAPI(
     title="WAVE Search API",
-    description="Recherche YouTube Music pour WAVE. Les téléchargements sont locaux au Samsung.",
+    description="Recherche YouTube Music pour WAVE. Import audio optionnel par lien et pont Samsung local.",
     version=APP_VERSION,
     docs_url="/docs",
     redoc_url=None,
+    lifespan=audio_lifespan,
 )
 
 yt_music = YTMusic()
 app.include_router(identify_router)
+app.include_router(audio_import_router)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins(),
     allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["Accept", "Content-Type"],
     max_age=3600,
 )
@@ -83,7 +85,8 @@ def health() -> dict[str, str]:
         "version": APP_VERSION,
         "searchProvider": "ytmusicapi",
         "downloadProvider": "samsung-local",
-        "renderDownloads": "disabled",
+        "renderDownloads": "enabled" if audio_enabled() else "disabled",
+        "audioImport": "enabled" if audio_enabled() else "disabled",
     }
 
 

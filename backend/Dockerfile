@@ -1,4 +1,6 @@
-FROM python:3.12-slim
+FROM node:24-bookworm-slim AS javascript
+FROM python:3.12-slim-bookworm
+COPY --from=javascript /usr/local/bin/node /usr/local/bin/node
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -14,6 +16,7 @@ RUN pip install --upgrade pip setuptools wheel \
     && pip install -r requirements.txt
 
 COPY main.py ./main.py
+COPY audio_import.py ./audio_import.py
 COPY identify.py ./identify.py
 COPY identify_match.py ./identify_match.py
 COPY start.sh ./start.sh
