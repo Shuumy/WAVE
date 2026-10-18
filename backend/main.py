@@ -13,9 +13,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from ytmusicapi import YTMusic
 from identify import router as identify_router
-from audio_import import router as audio_import_router, lifespan as audio_lifespan, enabled as audio_enabled
+from audio_import import router as audio_import_router, lifespan as audio_lifespan, enabled as audio_enabled, audio_engine_status
 
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.1.0"
 DEFAULT_FRONTEND_ORIGINS = (
     "https://shuumy.github.io",
     "http://localhost:8000",
@@ -79,7 +79,7 @@ def root() -> dict[str, str]:
 
 
 @app.get("/api/health", tags=["État"])
-def health() -> dict[str, str]:
+def health() -> dict[str, Any]:
     return {
         "status": "ok",
         "version": APP_VERSION,
@@ -87,6 +87,7 @@ def health() -> dict[str, str]:
         "downloadProvider": "samsung-local",
         "renderDownloads": "enabled" if audio_enabled() else "disabled",
         "audioImport": "enabled" if audio_enabled() else "disabled",
+        "audioEngine": audio_engine_status(),
     }
 
 
