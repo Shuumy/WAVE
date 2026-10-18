@@ -1044,3 +1044,14 @@ html[lang="ar"] .nav-btn,html[lang="ar"] .tab-btn,html[lang="ar"] .view-title { 
   .nav-btn { min-width:0; flex:1; letter-spacing:.04em; }
   .nav-btn span { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:clamp(.57rem,2.1vw,.75rem); }
 }
+
+/* Direct audio import */
+.audio-link-form { padding: 22px; border: 1px solid var(--border, #333); border-radius: 16px; display: flex; flex-direction: column; gap: 14px; }
+.audio-link-form input, .audio-link-form select { background: var(--bg-secondary, #222); color: inherit; border: 1px solid var(--border, #555); border-radius: 10px; padding: 12px; font: inherit; min-width: 0; }
+.audio-link-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.audio-link-help { font-size: 12px; opacity: .7; line-height: 1.6; }
+#audioLinkStatus { line-height: 1.5; overflow-wrap: anywhere; }
+.audio-link-form .import-btn { text-align: center; cursor: pointer; text-decoration: none; }
+.audio-link-form [hidden] { display: none !important; }
+.audio-link-form button:disabled { opacity: .55; cursor: wait; }
+.audio-link-form :focus-visible { outline: 2px solid #a78bfa; outline-offset: 3px; }

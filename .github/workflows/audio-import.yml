@@ -1,0 +1,25 @@
+name: Audio import checks
+on:
+  pull_request:
+    paths: ['backend/**', 'js/audio-import.js', 'tests/test_audio_import.py', 'tests/audio-import.test.js', '.github/workflows/audio-import.yml']
+  push:
+    branches: [main]
+    paths: ['backend/**', 'js/audio-import.js', 'tests/test_audio_import.py', 'tests/audio-import.test.js', '.github/workflows/audio-import.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: pip install -r backend/requirements.txt pytest httpx
+      - run: python -m pytest -q tests/test_audio_import.py
+      - run: node --check js/app.js && node --test tests/audio-import.test.js

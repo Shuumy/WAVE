@@ -1834,6 +1834,7 @@
     showToast(ok > 0 ? `${ok} morceau${ok>1?'x':''} importé${ok>1?'s':''}` : 'Format non supporté');
     setTimeout(() => { importProgress.hidden=true; importProgressFill.style.width='0%'; }, 2000);
     refreshImportView(); refreshHomeView(); WaveIdentify.wake();
+    return ok;
   }
   fileInput.addEventListener('change', () => { if(fileInput.files.length) { importFiles(fileInput.files); fileInput.value=''; } });
   importDropzone.addEventListener('click', (e) => { if(!e.target.closest('.import-btn') && e.target.tagName!=='LABEL') fileInput.click(); });
@@ -1919,6 +1920,7 @@
   });
 
   const WAVE_API_BASE_URL = 'https://wave-docker.onrender.com';
+  WaveAudioImport.init(WAVE_API_BASE_URL, importFiles);
   const canSaveYouTubeOffline = /Android/i.test(navigator.userAgent);
 
   function getVideoId(item) {
