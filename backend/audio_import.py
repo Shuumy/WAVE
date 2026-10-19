@@ -19,6 +19,8 @@ import time
 from urllib.parse import parse_qs, urlsplit
 from typing import Literal
 
+import audio_providers
+
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -40,6 +42,8 @@ class AudioProcessError(RuntimeError):
 
 def process_error(stderr: str, stage: str) -> AudioProcessError:
     text = stderr.lower()
+    if stage == "ffprobe":
+        return AudioProcessError("provider_invalid_media", "Le service n’a pas renvoyé un fichier audio valide.")
     if stage == "ffmpeg":
         return AudioProcessError("conversion_failed", "La conversion audio a échoué.")
     if "sign in to confirm" in text or "not a bot" in text:
@@ -78,7 +82,7 @@ def audio_engine_status() -> dict:
     except PackageNotFoundError:
         plugin = "missing"
     home = os.getenv("WAVE_POT_SERVER_HOME", "/opt/bgutil")
-    return {"provider": "bgutil-script", "providerVersion": plugin,
+    return {"acquisitionProvider": os.getenv("AUDIO_IMPORT_PROVIDER", "yt-dlp"), "provider": "bgutil-script", "providerVersion": plugin,
             "providerInstalled": Path(home, "build/generate_once.js").is_file(),
             "nodeInstalled": bool(shutil.which("node")), "ffmpegInstalled": bool(shutil.which("ffmpeg"))}
 
@@ -181,7 +185,7 @@ async def run_process(args: list[str], directory: Path, timeout: int = JOB_TIMEO
         await reader
         if process.returncode:
             detail = tail.decode("utf-8", errors="replace")
-            stage = "ffmpeg" if args[0] == "ffmpeg" else "extractor"
+            stage = args[0] if args[0] in {"ffmpeg", "ffprobe"} else "extractor"
             error = process_error(detail, stage)
             logger.warning("Audio import stage=%s code=%s exit=%s diagnostic=%s", stage, error.code, process.returncode, safe_diagnostic(detail))
             raise error
@@ -201,17 +205,34 @@ async def process_job(job: Job):
         async with worker:
             job.state, job.message = "extracting", "Récupération de la piste audio…"
             # Canonical URL only: never pass arbitrary user URLs to the extractor.
-            await run_process([
-                sys.executable, "-m", "yt_dlp", "--ignore-config",
-                "--no-playlist", "--no-progress", "--quiet",
-                "--extractor-args", "youtube:player_client=mweb,default",
-                "--extractor-args", "youtubepot-bgutilscript:server_home=" + os.getenv("WAVE_POT_SERVER_HOME", "/opt/bgutil"),
-                "--js-runtimes", "node", "--socket-timeout", "15", "--retries", "1",
-                "--fragment-retries", "1", "--extractor-retries", "1", "--max-filesize", str(MAX_BYTES),
-                "--match-filters", "!is_live & duration <= 1800", "--write-info-json",
-                "-f", "bestaudio", "-o", str(job.directory / "source.%(ext)s"),
-                "--", f"https://www.youtube.com/watch?v={job.video_id}",
-            ], job.directory)
+            provider, _ = audio_providers.configuration()
+            if provider != "yt-dlp":
+                job.message = f"Récupération audio via {provider.capitalize()}…"
+                async with asyncio.timeout(210):
+                    await audio_providers.acquire(job.video_id, job.directory)
+                # Validate actual media and duration, regardless of provider metadata.
+                await run_process([
+                    "ffprobe", "-v", "error", "-protocol_whitelist", "file,pipe",
+                    "-show_format", "-show_streams", "-of", "json",
+                    "-o", str(job.directory / "probe.json"),
+                    str(job.directory / "source.media"),
+                ], job.directory, timeout=20)
+                probe = json.loads((job.directory / "probe.json").read_text())
+                duration = float(probe.get("format", {}).get("duration", 0))
+                if not 0 < duration <= 1800 or not any(s.get("codec_type") == "audio" for s in probe.get("streams", [])):
+                    raise audio_providers.ProviderError("media_duration", "Choisis un fichier audio de 30 minutes maximum.")
+            else:
+                await run_process([
+                    sys.executable, "-m", "yt_dlp", "--ignore-config",
+                    "--no-playlist", "--no-progress", "--quiet",
+                    "--extractor-args", "youtube:player_client=mweb,default",
+                    "--extractor-args", "youtubepot-bgutilscript:server_home=" + os.getenv("WAVE_POT_SERVER_HOME", "/opt/bgutil"),
+                    "--js-runtimes", "node", "--socket-timeout", "15", "--retries", "1",
+                    "--fragment-retries", "1", "--extractor-retries", "1", "--max-filesize", str(MAX_BYTES),
+                    "--match-filters", "!is_live & duration <= 1800", "--write-info-json",
+                    "-f", "bestaudio", "-o", str(job.directory / "source.%(ext)s"),
+                    "--", f"https://www.youtube.com/watch?v={job.video_id}",
+                ], job.directory)
             candidates = [p for p in job.directory.glob("source.*") if p.suffix not in {".json", ".part", ".ytdl"}]
             if len(candidates) != 1 or not 0 < candidates[0].stat().st_size <= MAX_BYTES:
                 raise RuntimeError("Aucune piste audio disponible (maximum 30 minutes et 100 Mo).")
@@ -279,7 +300,11 @@ async def create_import(body: ImportRequest, request: Request):
     purge()
     if len(jobs) >= MAX_JOBS:
         raise HTTPException(429, "Le service est occupé. Réessaie après quelques minutes.")
-    if not shutil.which("ffmpeg") or not shutil.which("node"):
+    try:
+        provider, _ = audio_providers.configuration()
+    except audio_providers.ProviderError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    if not shutil.which("ffmpeg") or (provider != "yt-dlp" and not shutil.which("ffprobe")) or (provider == "yt-dlp" and not shutil.which("node")):
         raise HTTPException(503, "Le moteur audio n’est pas disponible sur ce serveur.")
     token = secrets.token_urlsafe(32)
     job = Job(token, video, body.format, Path(tempfile.mkdtemp(prefix="wave-import-")))
