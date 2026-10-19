@@ -115,6 +115,7 @@ def youtube_id(url: str) -> str:
 class ImportRequest(BaseModel):
     url: str = Field(min_length=1, max_length=2048)
     format: Literal["mp3", "m4a"] = "mp3"
+    provider: Literal["cobalt", "piped"] | None = None
 
 
 @dataclass
@@ -130,6 +131,7 @@ class Job:
     expires: float = 0
     task: asyncio.Task | None = None
     error_code: str | None = None
+    provider: str | None = None
 
 
 jobs: dict[str, Job] = {}
@@ -205,11 +207,11 @@ async def process_job(job: Job):
         async with worker:
             job.state, job.message = "extracting", "Récupération de la piste audio…"
             # Canonical URL only: never pass arbitrary user URLs to the extractor.
-            provider, _ = audio_providers.configuration()
+            provider, _ = audio_providers.configuration(job.provider)
             if provider != "yt-dlp":
                 job.message = f"Récupération audio via {provider.capitalize()}…"
                 async with asyncio.timeout(210):
-                    await audio_providers.acquire(job.video_id, job.directory)
+                    await audio_providers.acquire(job.video_id, job.directory, provider)
                 # Validate actual media and duration, regardless of provider metadata.
                 await run_process([
                     "ffprobe", "-v", "error", "-protocol_whitelist", "file,pipe",
@@ -301,13 +303,13 @@ async def create_import(body: ImportRequest, request: Request):
     if len(jobs) >= MAX_JOBS:
         raise HTTPException(429, "Le service est occupé. Réessaie après quelques minutes.")
     try:
-        provider, _ = audio_providers.configuration()
+        provider, _ = audio_providers.configuration(body.provider)
     except audio_providers.ProviderError as exc:
         raise HTTPException(503, str(exc)) from exc
     if not shutil.which("ffmpeg") or (provider != "yt-dlp" and not shutil.which("ffprobe")) or (provider == "yt-dlp" and not shutil.which("node")):
         raise HTTPException(503, "Le moteur audio n’est pas disponible sur ce serveur.")
     token = secrets.token_urlsafe(32)
-    job = Job(token, video, body.format, Path(tempfile.mkdtemp(prefix="wave-import-")))
+    job = Job(token, video, body.format, Path(tempfile.mkdtemp(prefix="wave-import-")), provider=provider)
     jobs[token] = job
     job.task = asyncio.create_task(process_job(job))
     return {"id": token, "state": job.state}

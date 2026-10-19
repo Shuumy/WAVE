@@ -10,9 +10,9 @@
     return data;
   }
 
-  async function convert(base, url, format, onStatus) {
+  async function convert(base, url, format, onStatus, provider = null) {
     const created = await jsonRequest(`${base}/api/imports`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, format }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, format, provider: provider || null }),
     });
     const id = encodeURIComponent(created.id);
     const deadline = Date.now() + 30 * 60 * 1000;
@@ -42,6 +42,7 @@
     if (!form) return;
     const status = document.getElementById('audioLinkStatus');
     const submit = document.getElementById('audioLinkSubmit');
+    const direct = document.getElementById('audioLinkDirect');
     const download = document.getElementById('audioLinkDownload');
     const retry = document.getElementById('audioLinkSave');
     let objectUrl = null, file = null, busy = false;
@@ -62,22 +63,31 @@
     form.addEventListener('submit', async event => {
       event.preventDefault();
       if (busy) return;
-      busy = true; submit.disabled = true; form.setAttribute('aria-busy', 'true');
+      const downloadOnly = !event.submitter || event.submitter.value === 'download';
+      busy = true; submit.disabled = true; direct.disabled = true; form.setAttribute('aria-busy', 'true');
       download.hidden = true; retry.hidden = true;
       if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
       say('Connexion au service audio… Le premier démarrage peut prendre une minute.');
       try {
-        file = await convert(base, form.elements.url.value.trim(), form.elements.format.value, say);
+        file = await convert(base, form.elements.url.value.trim(), form.elements.format.value, say, form.elements.provider.value);
         objectUrl = URL.createObjectURL(file);
         download.href = objectUrl; download.download = file.name; download.hidden = false;
-        await save();
+        if (downloadOnly) {
+          retry.textContent = 'Ajouter aussi à la bibliothèque';
+          retry.hidden = false;
+          download.click();
+          say('Fichier audio prêt. Si le téléchargement ne démarre pas, touche « Télécharger le fichier audio ».');
+        } else {
+          retry.textContent = 'Réessayer l’ajout à la bibliothèque';
+          await save();
+        }
       } catch (error) {
         say(error.name === 'TimeoutError' ? 'Le serveur met trop de temps à répondre. Réessaie dans une minute.' : error.message || 'Échec de l’import.');
       } finally {
-        busy = false; submit.disabled = false; form.setAttribute('aria-busy', 'false');
+        busy = false; submit.disabled = false; direct.disabled = false; form.setAttribute('aria-busy', 'false');
       }
     });
   }
-  if (typeof module !== 'undefined' && module.exports) module.exports = { convert, jsonRequest };
+  if (typeof module !== 'undefined' && module.exports) module.exports = { convert, jsonRequest, init };
   else window.WaveAudioImport = { init };
 })();

@@ -189,7 +189,7 @@
           <p class="import-progress-text" id="importProgressText">Importation...</p>
         </div>
 
-        <div class="external-download-divider">Importer depuis un lien YouTube</div>
+        <div class="external-download-divider">Télécharger ou importer depuis YouTube</div>
         <form id="audioLinkForm" class="audio-link-form">
           <label for="audioLinkUrl">Lien de la vidéo</label>
           <input id="audioLinkUrl" name="url" type="url" required maxlength="2048"
@@ -197,7 +197,10 @@
           <div class="audio-link-actions">
             <label for="audioLinkFormat">Format</label>
             <select id="audioLinkFormat" name="format"><option value="mp3">MP3</option><option value="m4a">M4A</option></select>
-            <button id="audioLinkSubmit" class="import-btn" type="submit">Convertir et importer</button>
+            <label for="audioLinkProvider">Service</label>
+            <select id="audioLinkProvider" name="provider"><option value="">Service configuré</option><option value="cobalt">Cobalt</option><option value="piped">Piped</option></select>
+            <button id="audioLinkDirect" class="import-btn" type="submit" name="action" value="download">Télécharger l’audio</button>
+            <button id="audioLinkSubmit" class="import-btn" type="submit" name="action" value="import">Convertir et importer</button>
           </div>
           <p class="audio-link-help">Vidéo publique de 30 minutes maximum. Importe uniquement les contenus que tu es autorisé à télécharger.</p>
           <p id="audioLinkStatus" role="status" aria-live="polite"></p>

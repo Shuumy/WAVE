@@ -172,3 +172,15 @@ Sources : [API Cobalt](https://github.com/imputnet/cobalt/blob/main/docs/api.md)
 [instances Piped](https://github.com/TeamPiped/documentation/blob/main/content/docs/public-instances/index.md),
 [annuaire communautaire Cobalt](https://cobalt.directory/).
 Un statut dans un annuaire ne garantit ni l'autorisation d'intégration, ni la disponibilité.
+
+### Télécharger sans importer
+
+Dans Importer, « Télécharger l’audio » prépare le fichier puis propose son enregistrement
+sur l’appareil, sans écrire dans la bibliothèque. « Convertir et importer » conserve
+l’import hors ligne. Un lien de téléchargement manuel reste visible pour les navigateurs
+qui bloquent le déclenchement automatique, notamment sur mobile.
+
+Le champ `provider` optionnel de `POST /api/imports` accepte seulement `cobalt` ou `piped`.
+Il sélectionne une configuration serveur existante ; aucune URL de fournisseur ni clé
+n’est acceptée depuis le navigateur. Un service non configuré renvoie 503 avant création
+d’un job. Sans ce champ, le fournisseur par défaut du serveur est utilisé.
