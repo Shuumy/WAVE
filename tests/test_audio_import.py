@@ -270,3 +270,20 @@ def test_explicit_provider_requires_configuration(client, monkeypatch):
 def test_provider_selection_is_allowlisted(client):
     response = client.post('/api/imports', json={'url': 'https://youtu.be/BaW_jenozKc', 'provider': 'https://evil.test'})
     assert response.status_code == 422
+
+
+def test_configuration_endpoint_excludes_unconfigured_providers(client, monkeypatch):
+    monkeypatch.setenv('AUDIO_IMPORT_PROVIDER', 'yt-dlp')
+    monkeypatch.delenv('COBALT_API_URL', raising=False)
+    monkeypatch.delenv('PIPED_API_URL', raising=False)
+    response = client.get('/api/imports/config')
+    assert response.status_code == 200
+    values = {p['value']: p['configured'] for p in response.json()['providers']}
+    assert values == {'': True, 'cobalt': False, 'piped': False}
+    monkeypatch.setenv('COBALT_API_URL', 'https://private-api.example')
+    monkeypatch.setenv('COBALT_API_KEY', 'secret-must-not-be-returned')
+    response = client.get('/api/imports/config')
+    assert response.json()['providers'][1]['configured'] is True
+    assert 'private-api' not in response.text and 'secret-must' not in response.text
+    monkeypatch.setenv('AUDIO_IMPORT_ENABLED', 'false')
+    assert not any(p['configured'] for p in client.get('/api/imports/config').json()['providers'])

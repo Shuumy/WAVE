@@ -45,7 +45,53 @@
     const direct = document.getElementById('audioLinkDirect');
     const download = document.getElementById('audioLinkDownload');
     const retry = document.getElementById('audioLinkSave');
-    let objectUrl = null, file = null, busy = false;
+    const providerStatus = document.getElementById('audioProviderStatus');
+    const refresh = document.getElementById('audioProviderRefresh');
+    const fields = [form.elements.url, form.elements.format, form.elements.provider];
+    let objectUrl = null, file = null, busy = false, services = null;
+    const selectedConfigured = () => services?.some(p => p.value === form.elements.provider.value && p.configured) === true;
+    const updateControls = () => {
+      submit.disabled = direct.disabled = busy || !selectedConfigured();
+      fields.forEach(field => { field.disabled = busy; });
+    };
+    const clearResult = () => {
+      if (busy) return;
+      status.textContent = '';
+      download.hidden = retry.hidden = true;
+      file = null;
+      if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
+      updateControls();
+    };
+    form.addEventListener('input', clearResult);
+    form.addEventListener('change', clearResult);
+    const loadServices = async () => {
+      if (busy) return;
+      services = null;
+      updateControls();
+      refresh.hidden = true;
+      providerStatus.textContent = 'Vérification des services…';
+      try {
+        const data = await jsonRequest(`${base}/api/imports/config`);
+        if (!Array.isArray(data.providers)) throw new Error('Invalid configuration');
+        services = data.providers;
+        for (const option of form.elements.provider.options) {
+          const service = services.find(p => p.value === option.value);
+          option.disabled = !service?.configured;
+          option.textContent = `${service?.label || option.textContent.split(' — ')[0]}${option.disabled ? ' — indisponible' : ''}`;
+        }
+        if (!selectedConfigured()) form.elements.provider.value = services.find(p => p.configured)?.value || '';
+        const missing = services.filter(p => p.value && !p.configured).map(p => p.label);
+        providerStatus.textContent = missing.length
+          ? `${missing.join(' et ')} indisponible${missing.length > 1 ? 's' : ''} : aucun serveur configuré pour WAVE. Leur sélection est désactivée.`
+          : 'Services configurés. La récupération reste soumise à leur disponibilité.';
+        if (!selectedConfigured()) providerStatus.textContent = 'Le téléchargement par lien est indisponible. Tu peux importer un fichier audio depuis ton appareil.';
+        clearResult();
+      } catch {
+        providerStatus.textContent = 'Impossible de vérifier les services audio. Réessaie la vérification.';
+        refresh.hidden = false;
+      } finally { updateControls(); }
+    };
+    refresh.addEventListener('click', loadServices);
     const say = text => { status.textContent = text; };
     const save = async () => {
       retry.disabled = true;
@@ -62,9 +108,9 @@
     retry.addEventListener('click', save);
     form.addEventListener('submit', async event => {
       event.preventDefault();
-      if (busy) return;
+      if (busy || !selectedConfigured()) return;
       const downloadOnly = !event.submitter || event.submitter.value === 'download';
-      busy = true; submit.disabled = true; direct.disabled = true; form.setAttribute('aria-busy', 'true');
+      busy = true; updateControls(); form.setAttribute('aria-busy', 'true');
       download.hidden = true; retry.hidden = true;
       if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
       say('Connexion au service audio… Le premier démarrage peut prendre une minute.');
@@ -84,9 +130,10 @@
       } catch (error) {
         say(error.name === 'TimeoutError' ? 'Le serveur met trop de temps à répondre. Réessaie dans une minute.' : error.message || 'Échec de l’import.');
       } finally {
-        busy = false; submit.disabled = false; direct.disabled = false; form.setAttribute('aria-busy', 'false');
+        busy = false; updateControls(); form.setAttribute('aria-busy', 'false');
       }
     });
+    return loadServices();
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = { convert, jsonRequest, init };
   else window.WaveAudioImport = { init };

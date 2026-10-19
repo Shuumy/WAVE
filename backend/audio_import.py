@@ -315,6 +315,20 @@ async def create_import(body: ImportRequest, request: Request):
     return {"id": token, "state": job.state}
 
 
+@router.get("/config")
+async def import_configuration():
+    # Configuration only, not a claim that upstream extraction is healthy.
+    providers = []
+    for value, label in [(None, "Serveur WAVE"), ("cobalt", "Cobalt"), ("piped", "Piped")]:
+        configured = enabled()
+        try:
+            audio_providers.configuration(value)
+        except audio_providers.ProviderError:
+            configured = False
+        providers.append({"value": value or "", "label": label, "configured": configured})
+    return {"providers": providers}
+
+
 @router.get("/{token}")
 async def import_status(token: str):
     job = get_job(token)
