@@ -46,3 +46,35 @@ test('HTML payload cannot be imported as audio', async () => {
   try { await assert.rejects(convert('https://api.test','url','mp3',()=>{}), /fichier audio valide/); }
   finally { global.fetch = original; }
 });
+
+test('direct download uses the selected provider without adding to the library', async () => {
+  const { init } = require('../js/audio-import.js');
+  const originalFetch = global.fetch, originalDocument = global.document;
+  const nodes = {};
+  for (const id of ['audioLinkForm','audioLinkStatus','audioLinkSubmit','audioLinkDirect','audioLinkDownload','audioLinkSave']) {
+    nodes[id] = { hidden: true, listeners: {}, addEventListener(name, fn) { this.listeners[name] = fn; }, setAttribute() {}, click() { this.clicked = true; } };
+  }
+  nodes.audioLinkForm.elements = { url: {value:'https://youtu.be/BaW_jenozKc'}, format: {value:'mp3'}, provider: {value:'cobalt'} };
+  global.document = {getElementById: id => nodes[id]};
+  let saved = 0, selected;
+  global.fetch = async (url, options) => {
+    if (options.method === 'POST') { selected = JSON.parse(options.body).provider; return Response.json({id:'download'}); }
+    if (options.method === 'DELETE') return new Response(null, {status:204});
+    if (url.endsWith('/file')) return new Response('fixture', {headers:{'content-type':'audio/mpeg'}});
+    return Response.json({state:'ready',title:'Demo'});
+  };
+  try {
+    init('https://api.test', async () => { saved++; return 1; });
+    await nodes.audioLinkForm.listeners.submit({preventDefault(){},submitter:{value:'download'}});
+    assert.equal(selected, 'cobalt');
+    assert.equal(saved, 0);
+    assert.equal(nodes.audioLinkDownload.clicked, true);
+    assert.equal(nodes.audioLinkDownload.download, 'Demo.mp3');
+    assert.equal(nodes.audioLinkSave.hidden, false);
+    await nodes.audioLinkSave.listeners.click();
+    assert.equal(saved, 1);
+  } finally {
+    URL.revokeObjectURL(nodes.audioLinkDownload.href);
+    global.fetch = originalFetch; global.document = originalDocument;
+  }
+});

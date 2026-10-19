@@ -60,15 +60,15 @@ class PublicResolver(aiohttp.abc.AbstractResolver):
         await self.inner.close()
 
 
-def configuration() -> tuple[str, str]:
-    provider = os.getenv('AUDIO_IMPORT_PROVIDER', 'yt-dlp').strip().lower()
+def configuration(selected: str | None = None) -> tuple[str, str]:
+    provider = selected or os.getenv('AUDIO_IMPORT_PROVIDER', 'yt-dlp').strip().lower()
     if provider == 'yt-dlp':
         return provider, ''
     if provider not in {'cobalt', 'piped'}:
         raise ProviderError('provider_configuration', 'Le fournisseur audio est mal configuré.')
     base = os.getenv('COBALT_API_URL' if provider == 'cobalt' else 'PIPED_API_URL', '').strip().rstrip('/')
     if not base:
-        raise ProviderError('provider_configuration', 'Aucun serveur audio externe n’est configuré.')
+        raise ProviderError('provider_configuration', f'Aucun serveur {provider.capitalize()} n’est configuré pour WAVE.')
     validate_url(base)
     if urlsplit(base).query:
         raise ProviderError('provider_configuration', 'L’adresse du fournisseur est mal configurée.')
@@ -120,8 +120,8 @@ async def download(session, url: str, destination: Path, hosts: set[str]):
             raise ProviderError('provider_invalid_media', 'Le service a renvoyé un fichier vide.')
 
 
-async def _acquire(video_id: str, directory: Path):
-    provider, base = configuration()
+async def _acquire(video_id: str, directory: Path, selected: str | None = None):
+    provider, base = configuration(selected)
     host = urlsplit(base).hostname
     connector = aiohttp.TCPConnector(resolver=PublicResolver(), use_dns_cache=False)
     timeout = aiohttp.ClientTimeout(total=180, connect=15, sock_read=30)
@@ -170,9 +170,9 @@ async def _acquire(video_id: str, directory: Path):
         (directory / 'source.info.json').write_text(json.dumps({'title': title, 'artist': artist}))
 
 
-async def acquire(video_id: str, directory: Path):
+async def acquire(video_id: str, directory: Path, selected: str | None = None):
     try:
         async with asyncio.timeout(210):
-            await _acquire(video_id, directory)
+            await _acquire(video_id, directory, selected)
     except (aiohttp.ClientError, OSError, TimeoutError) as exc:
         raise ProviderError('provider_network_error', 'La connexion au service audio a échoué ou dépassé le délai.') from exc

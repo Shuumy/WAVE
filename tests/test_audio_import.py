@@ -185,7 +185,7 @@ def test_provider_dns_rebinding_rejected(monkeypatch):
 def test_external_provider_conversion(client, monkeypatch, format):
     monkeypatch.setenv('AUDIO_IMPORT_PROVIDER', 'cobalt')
     monkeypatch.setenv('COBALT_API_URL', 'https://api.example')
-    async def acquire(video, directory):
+    async def acquire(video, directory, provider=None):
         assert video == 'BaW_jenozKc'
         subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i',
                         'sine=duration=1', '-f', 'wav', str(directory / 'source.media')], check=True)
@@ -202,7 +202,7 @@ def test_external_provider_conversion(client, monkeypatch, format):
 def test_provider_reject_long_audio(client, monkeypatch):
     monkeypatch.setenv('AUDIO_IMPORT_PROVIDER', 'piped')
     monkeypatch.setenv('PIPED_API_URL', 'https://api.example')
-    async def acquire(video, directory):
+    async def acquire(video, directory, provider=None):
         (directory / 'source.media').write_bytes(b'fixture')
         (directory / 'source.info.json').write_text('{}')
     async def probe(args, directory, **kwargs):
@@ -256,3 +256,17 @@ def test_provider_status_no_retry(status, code):
     with pytest.raises(ProviderError) as error:
         check_status(status)
     assert error.value.code == code
+
+
+def test_explicit_provider_requires_configuration(client, monkeypatch):
+    monkeypatch.setenv('AUDIO_IMPORT_PROVIDER', 'yt-dlp')
+    monkeypatch.delenv('COBALT_API_URL', raising=False)
+    response = client.post('/api/imports', json={'url': 'https://youtu.be/BaW_jenozKc', 'provider': 'cobalt'})
+    assert response.status_code == 503
+    assert 'configuré' in response.json()['detail']
+    assert not audio.jobs
+
+
+def test_provider_selection_is_allowlisted(client):
+    response = client.post('/api/imports', json={'url': 'https://youtu.be/BaW_jenozKc', 'provider': 'https://evil.test'})
+    assert response.status_code == 422
