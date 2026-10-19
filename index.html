@@ -198,10 +198,12 @@
             <label for="audioLinkFormat">Format</label>
             <select id="audioLinkFormat" name="format"><option value="mp3">MP3</option><option value="m4a">M4A</option></select>
             <label for="audioLinkProvider">Service</label>
-            <select id="audioLinkProvider" name="provider"><option value="">Service configuré</option><option value="cobalt">Cobalt</option><option value="piped">Piped</option></select>
-            <button id="audioLinkDirect" class="import-btn" type="submit" name="action" value="download">Télécharger l’audio</button>
-            <button id="audioLinkSubmit" class="import-btn" type="submit" name="action" value="import">Convertir et importer</button>
+            <select id="audioLinkProvider" name="provider" aria-describedby="audioProviderStatus"><option value="">Serveur WAVE</option><option value="cobalt" disabled>Cobalt — indisponible</option><option value="piped" disabled>Piped — indisponible</option></select>
+            <button id="audioLinkDirect" class="import-btn" type="submit" name="action" value="download" disabled>Télécharger l’audio</button>
+            <button id="audioLinkSubmit" class="import-btn" type="submit" name="action" value="import" disabled>Convertir et importer</button>
           </div>
+          <p id="audioProviderStatus" class="audio-link-help" role="status">Vérification des services…</p>
+          <button id="audioProviderRefresh" class="import-btn" type="button" hidden>Réessayer la vérification</button>
           <p class="audio-link-help">Vidéo publique de 30 minutes maximum. Importe uniquement les contenus que tu es autorisé à télécharger.</p>
           <p id="audioLinkStatus" role="status" aria-live="polite"></p>
           <a id="audioLinkDownload" class="import-btn" hidden>Télécharger le fichier audio</a>

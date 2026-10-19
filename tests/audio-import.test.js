@@ -51,20 +51,22 @@ test('direct download uses the selected provider without adding to the library',
   const { init } = require('../js/audio-import.js');
   const originalFetch = global.fetch, originalDocument = global.document;
   const nodes = {};
-  for (const id of ['audioLinkForm','audioLinkStatus','audioLinkSubmit','audioLinkDirect','audioLinkDownload','audioLinkSave']) {
+  for (const id of ['audioLinkForm','audioLinkStatus','audioLinkSubmit','audioLinkDirect','audioLinkDownload','audioLinkSave','audioProviderStatus','audioProviderRefresh']) {
     nodes[id] = { hidden: true, listeners: {}, addEventListener(name, fn) { this.listeners[name] = fn; }, setAttribute() {}, click() { this.clicked = true; } };
   }
-  nodes.audioLinkForm.elements = { url: {value:'https://youtu.be/BaW_jenozKc'}, format: {value:'mp3'}, provider: {value:'cobalt'} };
+  nodes.audioLinkForm.elements = { url: {value:'https://youtu.be/BaW_jenozKc'}, format: {value:'mp3'}, provider: {value:'cobalt', options:[{value:'',textContent:'Serveur WAVE'},{value:'cobalt',textContent:'Cobalt'},{value:'piped',textContent:'Piped'}]} };
   global.document = {getElementById: id => nodes[id]};
   let saved = 0, selected;
   global.fetch = async (url, options) => {
+    if (url.endsWith('/config')) return Response.json({providers:[{value:'',label:'Serveur WAVE',configured:true},{value:'cobalt',label:'Cobalt',configured:true},{value:'piped',label:'Piped',configured:false}]});
     if (options.method === 'POST') { selected = JSON.parse(options.body).provider; return Response.json({id:'download'}); }
     if (options.method === 'DELETE') return new Response(null, {status:204});
     if (url.endsWith('/file')) return new Response('fixture', {headers:{'content-type':'audio/mpeg'}});
     return Response.json({state:'ready',title:'Demo'});
   };
   try {
-    init('https://api.test', async () => { saved++; return 1; });
+    await init('https://api.test', async () => { saved++; return 1; });
+    assert.equal(nodes.audioLinkForm.elements.provider.options[2].disabled, true);
     await nodes.audioLinkForm.listeners.submit({preventDefault(){},submitter:{value:'download'}});
     assert.equal(selected, 'cobalt');
     assert.equal(saved, 0);
@@ -73,6 +75,15 @@ test('direct download uses the selected provider without adding to the library',
     assert.equal(nodes.audioLinkSave.hidden, false);
     await nodes.audioLinkSave.listeners.click();
     assert.equal(saved, 1);
+    nodes.audioLinkStatus.textContent = 'Ancienne erreur Piped';
+    nodes.audioLinkForm.elements.provider.value = 'piped';
+    nodes.audioLinkForm.listeners.change();
+    assert.equal(nodes.audioLinkStatus.textContent, '');
+    assert.equal(nodes.audioLinkDownload.hidden, true);
+    assert.equal(nodes.audioLinkDirect.disabled, true);
+    nodes.audioLinkForm.elements.provider.value = 'cobalt';
+    nodes.audioLinkForm.listeners.change();
+    assert.equal(nodes.audioLinkDirect.disabled, false);
   } finally {
     URL.revokeObjectURL(nodes.audioLinkDownload.href);
     global.fetch = originalFetch; global.document = originalDocument;
