@@ -15,7 +15,7 @@ from ytmusicapi import YTMusic
 from identify import router as identify_router
 from audio_import import router as audio_import_router, lifespan as audio_lifespan, enabled as audio_enabled, audio_engine_status
 
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.2.0"
 DEFAULT_FRONTEND_ORIGINS = (
     "https://shuumy.github.io",
     "http://localhost:8000",

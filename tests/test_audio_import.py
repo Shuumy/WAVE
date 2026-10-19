@@ -151,3 +151,108 @@ def test_stderr_is_drained_bounded_and_classified(tmp_path):
     with pytest.raises(audio.AudioProcessError) as exc:
         asyncio.run(audio.run_process(command, tmp_path, timeout=5))
     assert exc.value.code == 'upstream_forbidden'
+
+
+@pytest.mark.parametrize('url', ['http://api.example/a', 'https://127.0.0.1/a',
+    'https://[::1]/', 'https://user:secret@api.example/a', 'https://api.example:444/a',
+    'https://evil.example/a', 'file:///tmp/a'])
+def test_provider_media_urls(url):
+    from audio_providers import validate_url, ProviderError
+    with pytest.raises(ProviderError):
+        validate_url(url, {'api.example'})
+
+
+@pytest.mark.parametrize('ip', ['127.0.0.1', '10.0.0.1', '169.254.169.254', '::1', 'fe80::1', '224.0.0.1'])
+def test_provider_private_network_rejected(ip):
+    from audio_providers import public_ip
+    assert not public_ip(ip)
+
+
+def test_provider_dns_rebinding_rejected(monkeypatch):
+    import audio_providers as providers
+    async def run():
+        resolver = providers.PublicResolver()
+        async def resolve(*args):
+            return [{'host': '8.8.8.8'}, {'host': '127.0.0.1'}]
+        monkeypatch.setattr(resolver.inner, 'resolve', resolve)
+        with pytest.raises(OSError):
+            await resolver.resolve('api.example')
+        await resolver.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('format', ['mp3', 'm4a'])
+def test_external_provider_conversion(client, monkeypatch, format):
+    monkeypatch.setenv('AUDIO_IMPORT_PROVIDER', 'cobalt')
+    monkeypatch.setenv('COBALT_API_URL', 'https://api.example')
+    async def acquire(video, directory):
+        assert video == 'BaW_jenozKc'
+        subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i',
+                        'sine=duration=1', '-f', 'wav', str(directory / 'source.media')], check=True)
+        (directory / 'source.info.json').write_text(json.dumps({'title': 'Cobalt fixture'}))
+    monkeypatch.setattr(audio.audio_providers, 'acquire', acquire)
+    token = client.post('/api/imports', json={'url': 'https://youtu.be/BaW_jenozKc', 'format': format}).json()['id']
+    job = completed(client, token)
+    assert job['state'] == 'ready', job
+    assert job['title'] == 'Cobalt fixture'
+    assert client.get(f'/api/imports/{token}/file').status_code == 200
+    client.delete(f'/api/imports/{token}')
+
+
+def test_provider_reject_long_audio(client, monkeypatch):
+    monkeypatch.setenv('AUDIO_IMPORT_PROVIDER', 'piped')
+    monkeypatch.setenv('PIPED_API_URL', 'https://api.example')
+    async def acquire(video, directory):
+        (directory / 'source.media').write_bytes(b'fixture')
+        (directory / 'source.info.json').write_text('{}')
+    async def probe(args, directory, **kwargs):
+        assert args[0] == 'ffprobe'
+        (directory / 'probe.json').write_text(json.dumps({'format': {'duration': 1801}, 'streams': [{'codec_type': 'audio'}]}))
+    monkeypatch.setattr(audio.audio_providers, 'acquire', acquire)
+    monkeypatch.setattr(audio, 'run_process', probe)
+    token = client.post('/api/imports', json={'url': 'https://youtu.be/BaW_jenozKc'}).json()['id']
+    assert completed(client, token)['errorCode'] == 'media_duration'
+    assert not audio.jobs[token].directory.exists()
+
+
+def test_cobalt_request_and_key_isolation(monkeypatch, tmp_path):
+    import audio_providers as p
+    monkeypatch.setenv('AUDIO_IMPORT_PROVIDER', 'cobalt')
+    monkeypatch.setenv('COBALT_API_URL', 'https://api.example')
+    monkeypatch.setenv('COBALT_API_KEY', 'test-key')
+    calls = []
+    class Body:
+        async def iter_chunked(self, _):
+            yield json.dumps({'status': 'tunnel', 'url': 'https://api.example/tunnel?id=test', 'filename': 'Demo.mp3'}).encode()
+    class Response:
+        status = 200
+        content = Body()
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+    class Session:
+        def __init__(self, **kwargs):
+            self.connector = kwargs['connector']
+            assert 'Authorization' not in kwargs['headers']
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): await self.connector.close()
+        def post(self, url, **kwargs):
+            calls.append(kwargs)
+            return Response()
+    async def download(session, url, dest, hosts):
+        assert hosts == {'api.example'}
+        dest.write_bytes(b'fixture')
+    monkeypatch.setattr(p.aiohttp, 'ClientSession', Session)
+    monkeypatch.setattr(p, 'download', download)
+    asyncio.run(p.acquire('BaW_jenozKc', tmp_path))
+    assert calls[0]['headers']['Authorization'] == 'Api-Key test-key'
+    assert calls[0]['json']['alwaysProxy'] is True
+    assert calls[0]['allow_redirects'] is False
+    assert json.loads((tmp_path / 'source.info.json').read_text())['title'] == 'Demo'
+
+
+@pytest.mark.parametrize('status,code', [(401, 'provider_access_required'), (403, 'provider_access_required'), (429, 'provider_rate_limited'), (302, 'provider_unavailable')])
+def test_provider_status_no_retry(status, code):
+    from audio_providers import check_status, ProviderError
+    with pytest.raises(ProviderError) as error:
+        check_status(status)
+    assert error.value.code == code

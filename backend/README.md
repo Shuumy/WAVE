@@ -145,3 +145,30 @@ au maximum 2 000 caractères d'un tampon d'erreur borné à 16 Kio ; URL, cookie
 jetons et longs identifiants sont masqués. Aucun mode verbose ni cookie de compte
 n'est utilisé. Une vérification YouTube obligatoire est signalée explicitement,
 sans répétition automatique ni changement de réseau pour la contourner.
+
+## Cobalt et Piped (import audio)
+
+Le backend accepte `AUDIO_IMPORT_PROVIDER=yt-dlp` (défaut), `cobalt` ou `piped`.
+L'interface d'import existante est conservée. Aucun annuaire n'est parcouru automatiquement et
+aucune rotation d'instances n'est faite après une erreur ou une limitation.
+
+- Cobalt : définir `COBALT_API_URL` (HTTPS) et, si l'opérateur le demande, `COBALT_API_KEY`.
+  La clé reste sur le serveur et n'est envoyée qu'à l'API de traitement, jamais au téléchargement.
+  Le connecteur demande un tunnel audio MP3 sur le même hôte ; FFmpeg produit ensuite MP3 ou M4A.
+- Piped : définir `PIPED_API_URL` et `PIPED_MEDIA_HOSTS` (hôtes exacts du proxy média,
+  séparés par des virgules). Les flux audio de `/streams/:id` sont récupérés puis convertis.
+  L'instance et son proxy doivent fonctionner et autoriser cet usage.
+- Configurer uniquement un service de confiance dont l'accès est ouvert pour cet usage,
+  autorisé par son opérateur, ou une instance personnelle. Les instances officielles Cobalt
+  protégées ne sont pas des API libres d'accès pour d'autres applications.
+- HTTPS avec validation TLS, refus des IP locales/privées à la résolution DNS, aucune
+  redirection, taille JSON limitée à 1 Mo, média limité à 100 Mo, durée vérifiée avec
+  FFprobe (30 minutes maximum), un seul import à la fois et nettoyage automatique.
+- Les challenges, authentifications et réponses 429 sont signalés sans tentative de contournement.
+- `/api/health` expose `audioEngine.acquisitionProvider`, sans URL signée ni secret.
+
+Sources : [API Cobalt](https://github.com/imputnet/cobalt/blob/main/docs/api.md),
+[API Piped](https://docs.piped.video/docs/api-documentation/),
+[instances Piped](https://github.com/TeamPiped/documentation/blob/main/content/docs/public-instances/index.md),
+[annuaire communautaire Cobalt](https://cobalt.directory/).
+Un statut dans un annuaire ne garantit ni l'autorisation d'intégration, ni la disponibilité.

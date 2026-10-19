@@ -18,6 +18,7 @@ RUN pip install --upgrade pip setuptools wheel \
 
 COPY main.py ./main.py
 COPY audio_import.py ./audio_import.py
+COPY audio_providers.py ./audio_providers.py
 COPY identify.py ./identify.py
 COPY identify_match.py ./identify_match.py
 COPY start.sh ./start.sh
